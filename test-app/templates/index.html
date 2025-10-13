@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <!-- 히어로 섹션 -->
+    <div class="hero">
+        <h1>🛒 VulnShop에 오신 것을 환영합니다</h1>
+        <p>최고의 전자제품을 합리적인 가격에 만나보세요</p>
+        <p class="text-muted" style="font-size: 0.9rem;">(이 사이트는 보안 취약점 테스트 목적으로 제작되었습니다)</p>
+        <div class="hero-buttons">
+            <a href="/products" class="btn btn-primary">상품 둘러보기</a>
+            {% if not session.get('username') %}
+            <a href="/register" class="btn btn-secondary">회원가입</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 추천 상품 -->
+    <h2 style="margin-bottom: 1.5rem;">🔥 인기 상품</h2>
+    <div class="card-grid">
+        {% for product in products %}
+        <div class="card">
+            <div class="card-image">{{ product[6] }}</div>
+            <div class="card-content">
+                <h3 class="card-title">{{ product[1] }}</h3>
+                <p class="card-description">{{ product[2] }}</p>
+                <div class="card-price">₩{{ '{:,}'.format(product[3]|int) }}</div>
+                <div class="card-actions">
+                    <a href="/product/{{ product[0] }}" class="btn btn-primary" style="flex: 1;">상세보기</a>
+                    <button class="btn btn-success" onclick="addToCartQuick({{ product[0] }}, '{{ product[1] }}', {{ product[3] }})">
+                        장바구니
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- 특징 -->
+    <div style="margin-top: 4rem;">
+        <h2 style="text-align: center; margin-bottom: 2rem;">왜 VulnShop인가요?</h2>
+        <div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));">
+            <div class="card" style="text-align: center; padding: 2rem;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">🚚</div>
+                <h3>빠른 배송</h3>
+                <p>주문 후 24시간 내 배송</p>
+            </div>
+            <div class="card" style="text-align: center; padding: 2rem;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">💳</div>
+                <h3>안전한 결제</h3>
+                <p>다양한 결제 수단 지원</p>
+            </div>
+            <div class="card" style="text-align: center; padding: 2rem;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">🎁</div>
+                <h3>회원 혜택</h3>
+                <p>적립금과 쿠폰 제공</p>
+            </div>
+            <div class="card" style="text-align: center; padding: 2rem;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">📞</div>
+                <h3>24/7 고객지원</h3>
+                <p>언제든지 문의하세요</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function addToCartQuick(id, name, price) {
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    cart.push({ id, name, price, quantity: 1 });
+    localStorage.setItem('cart', JSON.stringify(cart));
+    updateCartCount();
+    alert('장바구니에 추가되었습니다!');
+}
+</script>
+{% endblock %}

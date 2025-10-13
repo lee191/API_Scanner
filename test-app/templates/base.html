@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}VulnShop - 취약한 전자상거래{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- 네비게이션 바 -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="/">🛒 VulnShop</a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="/">홈</a></li>
+                <li><a href="/products">상품</a></li>
+                <li><a href="/cart">장바구니 <span id="cart-count" class="badge">0</span></a></li>
+                {% if session.get('username') %}
+                    <li><a href="/profile">프로필</a></li>
+                    {% if session.get('role') == 'admin' %}
+                        <li><a href="/admin">관리자</a></li>
+                    {% endif %}
+                    <li><a href="/logout">로그아웃 ({{ session.get('username') }})</a></li>
+                {% else %}
+                    <li><a href="/login">로그인</a></li>
+                    <li><a href="/register">회원가입</a></li>
+                {% endif %}
+            </ul>
+            <div class="nav-search">
+                <form action="/search" method="GET">
+                    <input type="text" name="q" placeholder="상품 검색..." />
+                    <button type="submit">🔍</button>
+                </form>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 메인 컨텐츠 -->
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- 푸터 -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h3>VulnShop</h3>
+                    <p>취약점 테스트용 전자상거래 플랫폼</p>
+                    <p class="text-muted">교육 목적으로만 사용하세요</p>
+                </div>
+                <div class="footer-section">
+                    <h4>고객 지원</h4>
+                    <ul>
+                        <li><a href="/help">도움말</a></li>
+                        <li><a href="/contact">문의하기</a></li>
+                        <li><a href="/faq">자주 묻는 질문</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>정보</h4>
+                    <ul>
+                        <li><a href="/about">회사 소개</a></li>
+                        <li><a href="/terms">이용약관</a></li>
+                        <li><a href="/privacy">개인정보 처리방침</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>연결</h4>
+                    <div class="social-links">
+                        <a href="#">Facebook</a>
+                        <a href="#">Twitter</a>
+                        <a href="#">Instagram</a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 VulnShop. All rights reserved. For testing purposes only.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- JavaScript 파일 -->
+    <script src="/static/main.js"></script>
+    <script src="/static/auth.js"></script>
+    <script src="/static/shop.js"></script>
+    {% block extra_js %}{% endblock %}
+
+    <script>
+        // 장바구니 개수 업데이트
+        function updateCartCount() {
+            const cart = JSON.parse(localStorage.getItem('cart') || '[]');
+            document.getElementById('cart-count').textContent = cart.length;
+        }
+        updateCartCount();
+    </script>
+</body>
+</html>

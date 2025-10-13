@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <h1>내 프로필</h1>
+    <div class="card"><div class="card-content">
+        <p><strong>사용자명:</strong> {{ user[1] }}</p>
+        <p><strong>이메일:</strong> {{ user[3] }}</p>
+        <p><strong>역할:</strong> {{ user[4] }}</p>
+        <p><strong>API 키:</strong> <code>{{ user[5] }}</code></p>
+    </div></div>
+</div>
+{% endblock %}

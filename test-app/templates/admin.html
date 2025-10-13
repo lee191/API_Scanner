@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <h1>관리자 페이지</h1>
+    <h2>사용자 목록</h2>
+    <table class="table">
+        <tr><th>ID</th><th>사용자명</th><th>이메일</th><th>역할</th></tr>
+        {% for user in users %}<tr><td>{{ user[0] }}</td><td>{{ user[1] }}</td><td>{{ user[3] }}</td><td>{{ user[4] }}</td></tr>{% endfor %}
+    </table>
+    <h2>상품 목록</h2>
+    <table class="table">
+        <tr><th>ID</th><th>상품명</th><th>가격</th><th>재고</th></tr>
+        {% for product in products %}<tr><td>{{ product[0] }}</td><td>{{ product[1] }}</td><td>₩{{ '{:,}'.format(product[3]|int) }}</td><td>{{ product[5] }}</td></tr>{% endfor %}
+    </table>
+</div>
+{% endblock %}

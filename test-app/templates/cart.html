@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1 style="margin-bottom: 2rem;">장바구니</h1>
+
+    <div id="cart-items"></div>
+
+    <div class="card" style="margin-top: 2rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>총 금액</h3>
+            <div id="total-price" style="font-size: 1.5rem; color: #667eea; font-weight: bold;">₩0</div>
+        </div>
+        <button class="btn btn-primary" style="width: 100%; margin-top: 1rem;" onclick="checkout()">주문하기</button>
+    </div>
+</div>
+
+<script>
+function loadCart() {
+    const cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    const container = document.getElementById('cart-items');
+
+    if (cart.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">장바구니가 비어있습니다.</div>';
+        return;
+    }
+
+    let total = 0;
+    container.innerHTML = cart.map((item, index) => {
+        total += item.price * item.quantity;
+        return `
+            <div class="card" style="margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h3>${item.name}</h3>
+                        <p>가격: ₩${item.price.toLocaleString()}</p>
+                        <p>수량: ${item.quantity}</p>
+                    </div>
+                    <button class="btn btn-danger" onclick="removeItem(${index})">삭제</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    document.getElementById('total-price').textContent = '₩' + total.toLocaleString();
+}
+
+function removeItem(index) {
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    cart.splice(index, 1);
+    localStorage.setItem('cart', JSON.stringify(cart));
+    updateCartCount();
+    loadCart();
+}
+
+function checkout() {
+    const cart = JSON.parse(localStorage.getItem('cart') || '[]');
+
+    fetch('/api/v1/orders', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({items: cart})
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert('주문이 완료되었습니다!');
+        localStorage.setItem('cart', '[]');
+        updateCartCount();
+        loadCart();
+    })
+    .catch(err => alert('주문 처리 중 오류가 발생했습니다.'));
+}
+
+loadCart();
+</script>
+{% endblock %}

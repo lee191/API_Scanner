@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1 style="margin-bottom: 2rem;">상품 목록</h1>
+
+    <!-- 카테고리 필터 -->
+    <div style="margin-bottom: 2rem;">
+        <a href="/products?category=all" class="btn {% if category == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">
+            전체
+        </a>
+        <a href="/products?category=electronics" class="btn {% if category == 'electronics' %}btn-primary{% else %}btn-secondary{% endif %}">
+            전자제품
+        </a>
+    </div>
+
+    <div class="card-grid">
+        {% for product in products %}
+        <div class="card">
+            <div class="card-image">{{ product[6] }}</div>
+            <div class="card-content">
+                <h3 class="card-title">{{ product[1] }}</h3>
+                <p class="card-description">{{ product[2] }}</p>
+                <div class="card-price">₩{{ '{:,}'.format(product[3]|int) }}</div>
+                <p style="color: {% if product[5] > 10 %}#51cf66{% else %}#ff6b6b{% endif %}; font-size: 0.9rem;">
+                    재고: {{ product[5] }}개
+                </p>
+                <div class="card-actions">
+                    <a href="/product/{{ product[0] }}" class="btn btn-primary" style="flex: 1;">상세보기</a>
+                    <button class="btn btn-success" onclick="addToCart({{ product[0] }}, '{{ product[1] }}', {{ product[3] }})">
+                        담기
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+function addToCart(id, name, price) {
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    cart.push({ id, name, price, quantity: 1 });
+    localStorage.setItem('cart', JSON.stringify(cart));
+    updateCartCount();
+
+    // API 호출
+    fetch('/api/v1/cart/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({product_id: id, quantity: 1})
+    });
+
+    alert(`${name}이(가) 장바구니에 추가되었습니다!`);
+}
+</script>
+{% endblock %}

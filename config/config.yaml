@@ -1,0 +1,64 @@
+# Shadow API Scanner Configuration
+
+# Proxy Settings
+proxy:
+  host: "127.0.0.1"
+  port: 8080
+  ssl_insecure: true  # Allow self-signed certificates
+  timeout: 30
+
+# JavaScript Analysis
+js_analysis:
+  patterns:
+    - "fetch("
+    - "axios."
+    - "XMLHttpRequest"
+    - "$.ajax"
+    - "$.get"
+    - "$.post"
+  file_extensions:
+    - ".js"
+    - ".jsx"
+    - ".ts"
+    - ".tsx"
+
+# Endpoint Collection
+endpoints:
+  ignore_extensions:
+    - ".css"
+    - ".jpg"
+    - ".jpeg"
+    - ".png"
+    - ".gif"
+    - ".svg"
+    - ".ico"
+    - ".woff"
+    - ".woff2"
+    - ".ttf"
+  ignore_paths:
+    - "/static/"
+    - "/assets/"
+    - "/public/"
+
+# Vulnerability Scanner
+scanner:
+  checks:
+    - authentication
+    - authorization
+    - cors
+    - sensitive_data
+    - rate_limiting
+    - sql_injection
+    - xss
+    - csrf
+  timeout: 10
+  max_retries: 3
+
+# Output Settings
+output:
+  directory: "output"
+  formats:
+    - "json"
+    - "html"
+    - "markdown"
+  timestamp: true

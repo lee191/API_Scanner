@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <div class="card" style="max-width: 800px; margin: 0 auto;">
+        <div class="card-image" style="height: 300px; font-size: 8rem;">{{ product[6] }}</div>
+        <div class="card-content">
+            <h1 class="card-title">{{ product[1] }}</h1>
+            <p class="card-description">{{ product[2] }}</p>
+            <div class="card-price" style="font-size: 2rem;">₩{{ '{:,}'.format(product[3]|int) }}</div>
+            <p style="color: #51cf66;">재고: {{ product[5] }}개</p>
+            <button class="btn btn-success btn-lg" onclick="addToCart({{ product[0] }}, '{{ product[1] }}', {{ product[3] }})" style="width: 100%; padding: 1rem; font-size: 1.2rem;">장바구니에 담기</button>
+        </div>
+    </div>
+</div>
+<script>
+function addToCart(id, name, price) {
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    cart.push({id, name, price, quantity: 1});
+    localStorage.setItem('cart', JSON.stringify(cart));
+    updateCartCount();
+    alert('장바구니에 추가되었습니다!');
+}
+</script>
+{% endblock %}

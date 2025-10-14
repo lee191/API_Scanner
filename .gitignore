@@ -35,6 +35,8 @@ ENV/
 
 # Output
 output/
+.env
+.env.local
 reports/
 *.log
 

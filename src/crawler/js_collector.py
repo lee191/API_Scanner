@@ -4,28 +4,46 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Optional
 import re
 import time
+
+from src.crawler.directory_bruteforcer import DirectoryBruteForcer
 
 
 class JSCollector:
     """웹사이트에서 JavaScript 파일을 자동으로 수집하는 클래스."""
 
-    def __init__(self, base_url: str, timeout: int = 10):
+    def __init__(self, base_url: str, timeout: int = 10, enable_bruteforce: bool = False,
+                 wordlist_path: Optional[str] = None, include_subdomains: bool = True,
+                 include_external_js: bool = False):
         """
         Args:
             base_url: 대상 웹사이트 URL
             timeout: 요청 타임아웃 (초)
+            enable_bruteforce: 디렉토리 브루트포싱 활성화 여부
+            wordlist_path: 브루트포싱에 사용할 wordlist 경로 (기본값: 내장 wordlist)
+            include_subdomains: 서브도메인 포함 여부 (cdn.example.com 등)
+            include_external_js: 외부 JS 파일 포함 여부 (CDN, 3rd party 등)
         """
         self.base_url = base_url
         self.timeout = timeout
+        self.enable_bruteforce = enable_bruteforce
+        self.include_subdomains = include_subdomains
+        self.include_external_js = include_external_js
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         self.js_urls: Set[str] = set()
         self.js_contents: dict = {}
+        self.discovered_paths: List[str] = []
+
+        # 디렉토리 브루트포서 초기화
+        if enable_bruteforce:
+            self.bruteforcer = DirectoryBruteForcer(base_url, wordlist_path, timeout)
+        else:
+            self.bruteforcer = None
 
     def collect_from_page(self, url: str = None) -> List[str]:
         """
@@ -94,6 +112,41 @@ class JSCollector:
             print(f"[!] 페이지 크롤링 실패: {e}")
             return []
 
+    def collect_with_bruteforce(self) -> List[str]:
+        """
+        디렉토리 브루트포싱을 통해 숨겨진 경로를 발견하고,
+        각 경로에서 JavaScript 파일을 수집합니다.
+
+        Returns:
+            수집된 JavaScript 파일 URL 리스트
+        """
+        if not self.enable_bruteforce or not self.bruteforcer:
+            print("[!] 브루트포싱이 비활성화되어 있습니다.")
+            return self.collect_from_page()
+
+        # 1. 기본 페이지에서 JS 수집
+        print("\n[*] 기본 페이지에서 JavaScript 파일 수집 중...")
+        self.collect_from_page()
+
+        # 2. 디렉토리 브루트포싱 수행
+        print("\n[*] 디렉토리 브루트포싱 시작...")
+        self.discovered_paths = self.bruteforcer.brute_force()
+
+        # 3. 발견된 각 경로에서 JS 파일 수집
+        if self.discovered_paths:
+            print(f"\n[*] 발견된 {len(self.discovered_paths)}개 경로에서 JS 파일 수집 중...")
+            for i, path_url in enumerate(self.discovered_paths, 1):
+                print(f"\n[{i}/{len(self.discovered_paths)}] 크롤링: {path_url}")
+                try:
+                    self.collect_from_page(path_url)
+                    time.sleep(0.5)  # 서버 부하 방지
+                except Exception as e:
+                    print(f"[!] 크롤링 실패 ({path_url}): {e}")
+                    continue
+
+        print(f"\n[+] 브루트포싱 수집 완료: 총 {len(self.js_urls)}개 JS 파일 발견")
+        return list(self.js_urls)
+
     def download_js_files(self, output_dir: str) -> List[str]:
         """
         수집된 JavaScript 파일을 다운로드합니다.
@@ -153,6 +206,10 @@ class JSCollector:
         Returns:
             같은 도메인이면 True
         """
+        # 외부 JS 포함 옵션이 활성화되면 모든 JS 수집
+        if self.include_external_js:
+            return True
+
         base_domain = urlparse(self.base_url).netloc
         url_domain = urlparse(url).netloc
 
@@ -160,7 +217,64 @@ class JSCollector:
         if not url_domain:
             return True
 
-        return base_domain == url_domain
+        # 완전히 같은 도메인
+        if base_domain == url_domain:
+            return True
+
+        # 서브도메인 포함 옵션이 활성화된 경우
+        if self.include_subdomains:
+            # 루트 도메인 추출 (예: www.naver.com → naver.com)
+            base_root = self._get_root_domain(base_domain)
+            url_root = self._get_root_domain(url_domain)
+
+            if base_root and url_root and base_root == url_root:
+                return True
+
+        return False
+
+    def _get_root_domain(self, domain: str) -> Optional[str]:
+        """
+        루트 도메인을 추출합니다.
+
+        예:
+        - www.naver.com → naver.com
+        - cdn.naver.com → naver.com
+        - api.example.co.kr → example.co.kr
+        - localhost:5000 → localhost
+
+        Args:
+            domain: 도메인 문자열
+
+        Returns:
+            루트 도메인 또는 None
+        """
+        if not domain:
+            return None
+
+        # 포트 제거
+        if ':' in domain:
+            domain = domain.split(':')[0]
+
+        # localhost 처리
+        if domain == 'localhost' or domain.startswith('127.') or domain.startswith('192.168.'):
+            return domain
+
+        # IP 주소 처리
+        if all(part.isdigit() for part in domain.split('.')):
+            return domain
+
+        # 도메인 파트 분리
+        parts = domain.split('.')
+
+        # .co.kr, .ac.kr 등 2단계 TLD 처리
+        if len(parts) >= 3 and parts[-2] in ['co', 'ac', 'go', 'or', 'ne']:
+            return '.'.join(parts[-3:])
+
+        # 일반적인 경우 (최상위 2단계만)
+        if len(parts) >= 2:
+            return '.'.join(parts[-2:])
+
+        return domain
 
     def get_statistics(self) -> dict:
         """
@@ -172,5 +286,8 @@ class JSCollector:
         return {
             'total_js_files': len(self.js_urls),
             'downloaded_files': len(self.js_contents),
-            'js_urls': list(self.js_urls)
+            'js_urls': list(self.js_urls),
+            'bruteforce_enabled': self.enable_bruteforce,
+            'discovered_paths': len(self.discovered_paths),
+            'discovered_path_urls': self.discovered_paths
         }

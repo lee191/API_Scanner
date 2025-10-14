@@ -9,14 +9,40 @@ import esprima
 from bs4 import BeautifulSoup
 from src.utils.models import APIEndpoint, HTTPMethod
 
+# Try to import AI analyzer (optional)
+try:
+    from src.analyzer.ai_analyzer import AIJSAnalyzer
+    AI_AVAILABLE = True
+except ImportError:
+    AI_AVAILABLE = False
+    print("[!] AI Analyzer not available. Install openai package: pip install openai")
+
 
 class JSAnalyzer:
     """Analyze JavaScript files to extract API endpoints."""
 
-    def __init__(self):
-        """Initialize JS analyzer."""
+    def __init__(self, use_ai: bool = True):
+        """
+        Initialize JS analyzer.
+
+        Args:
+            use_ai: Enable AI-powered analysis (default: True)
+        """
         self.endpoints: List[APIEndpoint] = []
         self.seen_urls: Set[str] = set()
+        self.use_ai = use_ai and AI_AVAILABLE
+
+        # Initialize AI analyzer if available
+        if self.use_ai:
+            try:
+                self.ai_analyzer = AIJSAnalyzer()
+                if self.ai_analyzer.enabled:
+                    print("[+] AI-powered JS analysis enabled")
+                else:
+                    self.use_ai = False
+            except Exception as e:
+                print(f"[!] Failed to initialize AI analyzer: {e}")
+                self.use_ai = False
 
         # Common API patterns
         self.api_patterns = [
@@ -45,7 +71,27 @@ class JSAnalyzer:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
 
-            return self.analyze_content(content, base_url, source=file_path)
+            # Use regex-based analysis
+            endpoints = self.analyze_content(content, base_url, source=file_path)
+
+            # Enhance with AI if enabled
+            if self.use_ai and len(content) > 100:  # Only use AI for substantial files
+                try:
+                    print(f"[AI] Analyzing {file_path}...")
+                    ai_endpoints = self.ai_analyzer.analyze_js_code(content, file_path, base_url)
+
+                    # Merge AI results with regex results
+                    for ai_ep in ai_endpoints:
+                        endpoint_id = f"{ai_ep.method}:{ai_ep.url}"
+                        if endpoint_id not in self.seen_urls:
+                            self.seen_urls.add(endpoint_id)
+                            endpoints.append(ai_ep)
+                            print(f"  [AI] Found: {ai_ep.method} {ai_ep.url}")
+                except Exception as e:
+                    print(f"[!] AI analysis error: {e}")
+
+            return endpoints
+
         except Exception as e:
             print(f"[!] Error analyzing {file_path}: {e}")
             return []

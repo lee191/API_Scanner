@@ -11,9 +11,12 @@ playwright>=1.40.0
 esprima>=4.0.1
 lxml>=4.9.0
 
+# AI Analysis (Optional)
+openai>=1.0.0
+python-dotenv>=1.0.0
+
 # Security Analysis
 pyjwt>=2.8.0
-python-dotenv>=1.0.0
 
 # Reporting
 jinja2>=3.1.0
@@ -26,3 +29,8 @@ tqdm>=4.66.0
 
 # Data Processing
 pydantic>=2.5.0
+
+# Database
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+alembic>=1.13.0

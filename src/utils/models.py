@@ -34,6 +34,7 @@ class APIEndpoint(BaseModel):
     headers: Dict[str, str] = Field(default_factory=dict)
     body_example: Optional[str] = None
     response_example: Optional[str] = None
+    poc_code: Optional[str] = None  # Proof of Concept code to test the endpoint
     status_code: Optional[int] = None
     source: str = "unknown"  # 'proxy', 'js_analysis'
     timestamp: datetime = Field(default_factory=datetime.now)
@@ -51,6 +52,7 @@ class Vulnerability(BaseModel):
     description: str
     evidence: str
     recommendation: str
+    poc_code: Optional[str] = None  # Proof of Concept code to exploit the vulnerability
     cwe_id: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
@@ -65,6 +67,7 @@ class ScanResult(BaseModel):
     scan_end: Optional[datetime] = None
     endpoints: List[APIEndpoint] = Field(default_factory=list)
     vulnerabilities: List[Vulnerability] = Field(default_factory=list)
+    discovered_paths: List[str] = Field(default_factory=list)  # 브루트포싱으로 발견된 경로
     statistics: Dict[str, int] = Field(default_factory=dict)
 
     def add_endpoint(self, endpoint: APIEndpoint):
@@ -81,6 +84,7 @@ class ScanResult(BaseModel):
         self.statistics = {
             "total_endpoints": len(self.endpoints),
             "total_vulnerabilities": len(self.vulnerabilities),
+            "discovered_paths": len(self.discovered_paths),
             "critical": len([v for v in self.vulnerabilities if v.level == VulnerabilityLevel.CRITICAL]),
             "high": len([v for v in self.vulnerabilities if v.level == VulnerabilityLevel.HIGH]),
             "medium": len([v for v in self.vulnerabilities if v.level == VulnerabilityLevel.MEDIUM]),

@@ -78,6 +78,7 @@ class ReportGenerator:
                 'shadow_apis': len(shadow_endpoints),
                 'public_apis': len(public_endpoints)
             },
+            'discovered_paths': scan_result.discovered_paths,
             'shadow_apis': shadow_endpoints,
             'public_apis': public_endpoints,
             'all_endpoints': [
@@ -124,8 +125,23 @@ class ReportGenerator:
   - 🟠 High: {{ stats.high }}
   - 🟡 Medium: {{ stats.medium }}
   - 🟢 Low: {{ stats.low }}
+{% if stats.discovered_paths > 0 %}
+- **Discovered Paths**: {{ stats.discovered_paths }} (브루트포싱으로 발견된 경로)
+{% endif %}
 
 ---
+
+{% if discovered_paths %}
+## 🔍 Discovered Paths (브루트포싱으로 발견된 경로)
+
+브루트포싱을 통해 발견된 숨겨진 경로들입니다:
+
+{% for path in discovered_paths %}
+- `{{ path }}`
+{% endfor %}
+
+---
+{% endif %}
 
 ## 🔒 Shadow APIs (숨겨진/문서화되지 않은 API)
 
@@ -293,6 +309,7 @@ class ReportGenerator:
             scan_end=scan_result.scan_end.strftime("%Y-%m-%d %H:%M:%S") if scan_result.scan_end else "N/A",
             duration=duration,
             stats=stats,
+            discovered_paths=scan_result.discovered_paths,
             shadow_endpoints=shadow_endpoints,
             public_endpoints=public_endpoints,
             endpoints=endpoints_with_classification,
@@ -390,6 +407,18 @@ class ReportGenerator:
             <tr><td>시작 시간</td><td>{{ scan_start }}</td></tr>
             <tr><td>종료 시간</td><td>{{ scan_end }}</td></tr>
         </table>
+
+        {% if discovered_paths %}
+        <h2>🔍 Discovered Paths (브루트포싱으로 발견된 경로)</h2>
+        <p style="color:#7f8c8d; margin-bottom:15px;">브루트포싱을 통해 발견된 숨겨진 경로들입니다:</p>
+        <div style="background:#f8f9fa; padding:20px; border-radius:8px; border-left:4px solid #3498db;">
+            {% for path in discovered_paths %}
+            <div style="background:white; padding:10px; margin:5px 0; border-radius:4px; font-family:'Courier New',monospace;">
+                🔗 <code>{{ path }}</code>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
 
         <h2>🔒 Shadow APIs (숨겨진/문서화되지 않은 API)</h2>
         {% if shadow_endpoints %}
@@ -532,6 +561,7 @@ class ReportGenerator:
             scan_end=scan_result.scan_end.strftime("%Y-%m-%d %H:%M:%S") if scan_result.scan_end else "N/A",
             duration=duration,
             stats=stats,
+            discovered_paths=scan_result.discovered_paths,
             shadow_endpoints=shadow_endpoints,
             public_endpoints=public_endpoints,
             endpoints=scan_result.endpoints,

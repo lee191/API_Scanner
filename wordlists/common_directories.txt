@@ -1,0 +1,121 @@
+# Common directory wordlist for brute-forcing
+# API and admin paths
+/admin
+/api
+/api/v1
+/api/v2
+/api/v3
+/internal
+/internal/api
+/debug
+/test
+/dev
+/beta
+/staging
+
+# Backend and system paths
+/backup
+/backups
+/config
+/configuration
+/tmp
+/temp
+/cache
+/logs
+/log
+
+# Hidden and private paths
+/hidden
+/private
+/secret
+/secure
+/_private
+/_internal
+/_admin
+/_debug
+/_test
+
+# Development paths
+/development
+/devtools
+/console
+/phpMyAdmin
+/phpmyadmin
+/adminer
+/management
+/manager
+
+# API version paths
+/v0
+/v1
+/v2
+/v3
+/v4
+/api/v0
+/api/v1
+/api/v2
+/api/v3
+/api/v4
+
+# System and execution paths
+/exec
+/execute
+/eval
+/cmd
+/command
+/shell
+/system
+
+# File and upload paths
+/upload
+/uploads
+/files
+/download
+/downloads
+/media
+/static
+/assets
+
+# User and authentication paths
+/user
+/users
+/auth
+/login
+/register
+/account
+/profile
+/settings
+
+# Database and storage paths
+/db
+/database
+/data
+/storage
+/store
+
+# Monitoring and health paths
+/health
+/status
+/metrics
+/monitor
+/monitoring
+/stats
+/statistics
+
+# Documentation paths
+/docs
+/documentation
+/swagger
+/graphql
+/graphiql
+
+# Legacy and old versions
+/old
+/legacy
+/deprecated
+/archive
+/archived
+
+
+/products
+/cart

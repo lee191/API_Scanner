@@ -154,8 +154,10 @@ def combine(proxy_capture, js_analysis, scan_vulns):
 @click.argument('target')
 @click.option('--js-path', type=click.Path(exists=True), help='JavaScript 파일/디렉토리')
 @click.option('--scan-vulns/--no-scan-vulns', default=True, help='취약점 스캔 수행 여부')
+@click.option('--bruteforce/--no-bruteforce', default=False, help='디렉토리 브루트포싱 활성화')
+@click.option('--wordlist', type=click.Path(exists=True), help='브루트포싱 wordlist 경로')
 @click.option('--output', default='output', help='출력 디렉토리')
-def full_scan(target, js_path, scan_vulns, output):
+def full_scan(target, js_path, scan_vulns, bruteforce, wordlist, output):
     """전체 스캔 수행 (JS 분석 + 취약점 스캔 + 리포트)"""
     print(f"{Fore.GREEN}[*] 전체 스캔 시작: {target}{Style.RESET_ALL}\n")
 
@@ -186,10 +188,25 @@ def full_scan(target, js_path, scan_vulns, output):
             files = list(path_obj.glob('**/*.js'))
     else:
         print(f"[*] 웹사이트에서 자동 수집: {target}")
-        js_collector = JSCollector(target)
-        js_collector.collect_from_page()
+        if bruteforce:
+            print(f"{Fore.YELLOW}[*] 디렉토리 브루트포싱 활성화됨{Style.RESET_ALL}")
+        js_collector = JSCollector(target, enable_bruteforce=bruteforce, wordlist_path=wordlist)
+
+        # 브루트포싱이 활성화되면 collect_with_bruteforce 사용
+        if bruteforce:
+            js_collector.collect_with_bruteforce()
+        else:
+            js_collector.collect_from_page()
+
         downloaded_files = js_collector.download_js_files(str(temp_js_dir))
         files = [Path(f) for f in downloaded_files]
+
+        # 브루트포싱 통계 출력 및 발견된 경로 저장
+        if bruteforce:
+            stats = js_collector.get_statistics()
+            scan_result.discovered_paths = js_collector.discovered_paths
+            print(f"{Fore.GREEN}  [OK] 발견된 경로: {stats['discovered_paths']}개{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}  [OK] 수집된 JS 파일: {stats['total_js_files']}개{Style.RESET_ALL}\n")
 
     if files:
         print(f"{Fore.GREEN}  [OK] 수집된 JS 파일: {len(files)}개{Style.RESET_ALL}\n")
@@ -225,6 +242,21 @@ def full_scan(target, js_path, scan_vulns, output):
         if vuln_stats['high'] > 0:
             print(f"{Fore.YELLOW}    - High: {vuln_stats['high']}개{Style.RESET_ALL}")
         print()
+
+        # Generate PoC code for vulnerabilities using AI
+        if scan_result.vulnerabilities:
+            try:
+                from src.analyzer.ai_analyzer import AIJSAnalyzer
+                print(f"{Fore.CYAN}[*] AI를 사용하여 취약점 PoC 코드 생성 중...{Style.RESET_ALL}")
+                ai_analyzer = AIJSAnalyzer()
+                if ai_analyzer.enabled:
+                    scan_result.vulnerabilities = ai_analyzer.generate_vulnerability_poc(scan_result.vulnerabilities)
+                    poc_count = sum(1 for v in scan_result.vulnerabilities if v.poc_code)
+                    print(f"{Fore.GREEN}  [OK] PoC 코드 생성 완료: {poc_count}개{Style.RESET_ALL}\n")
+                else:
+                    print(f"{Fore.YELLOW}  [!] AI 기능이 비활성화되어 PoC 코드를 생성하지 않습니다{Style.RESET_ALL}\n")
+            except Exception as e:
+                print(f"{Fore.YELLOW}  [!] PoC 코드 생성 중 오류: {e}{Style.RESET_ALL}\n")
 
     # Add endpoints to result
     scan_result.endpoints = collector.get_endpoints()

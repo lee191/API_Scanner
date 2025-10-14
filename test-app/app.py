@@ -191,6 +191,163 @@ def debug_config():
     })
 
 
+# 브루트포싱 테스트용 숨겨진 페이지들
+@app.route('/admin')
+def admin_page():
+    """브루트포싱으로 발견 가능한 관리자 페이지"""
+    return render_template_string('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Panel</title>
+    <script src="/static/admin.js"></script>
+    <script src="/static/admin-dashboard.js"></script>
+</head>
+<body>
+    <h1>🔐 Admin Panel</h1>
+    <p>관리자 전용 페이지 - 브루트포싱으로 발견됨!</p>
+    <div id="admin-content"></div>
+    <script>
+        // 관리자 API 호출
+        fetch('/api/internal/admin/users')
+            .then(r => r.json())
+            .then(data => console.log('Admin users:', data));
+    </script>
+</body>
+</html>
+    ''')
+
+
+@app.route('/internal')
+def internal_page():
+    """브루트포싱으로 발견 가능한 내부 페이지"""
+    return render_template_string('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Internal Dashboard</title>
+    <script src="/static/internal-api.js"></script>
+    <script src="/static/internal-utils.js"></script>
+</head>
+<body>
+    <h1>🏢 Internal Dashboard</h1>
+    <p>내부 직원 전용 페이지</p>
+    <div id="internal-stats"></div>
+    <script>
+        // 내부 API 호출
+        fetch('/api/internal/stats')
+            .then(r => r.json())
+            .then(data => console.log('Internal stats:', data));
+    </script>
+</body>
+</html>
+    ''')
+
+
+@app.route('/debug')
+def debug_page():
+    """브루트포싱으로 발견 가능한 디버그 페이지"""
+    return render_template_string('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Console</title>
+    <script src="/static/debug-console.js"></script>
+    <script src="/static/debug-logger.js"></script>
+</head>
+<body>
+    <h1>🐛 Debug Console</h1>
+    <p>개발자 디버그 콘솔</p>
+    <div id="debug-output"></div>
+    <script>
+        // 디버그 API 호출
+        fetch('/api/internal/debug/config')
+            .then(r => r.json())
+            .then(data => {
+                console.log('Debug config:', data);
+                document.getElementById('debug-output').innerHTML =
+                    '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            });
+    </script>
+</body>
+</html>
+    ''')
+
+
+@app.route('/backup')
+def backup_page():
+    """브루트포싱으로 발견 가능한 백업 페이지"""
+    return render_template_string('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Backup Management</title>
+    <script src="/static/backup-manager.js"></script>
+</head>
+<body>
+    <h1>💾 Backup Management</h1>
+    <p>데이터베이스 백업 관리</p>
+    <div id="backup-list"></div>
+</body>
+</html>
+    ''')
+
+
+@app.route('/api')
+def api_docs():
+    """브루트포싱으로 발견 가능한 API 문서"""
+    return render_template_string('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Documentation</title>
+    <script src="/static/api-client.js"></script>
+    <script src="/static/api-explorer.js"></script>
+</head>
+<body>
+    <h1>📚 API Documentation</h1>
+    <h2>Public APIs</h2>
+    <ul>
+        <li>GET /api/v1/products</li>
+        <li>GET /api/v1/users</li>
+    </ul>
+    <h2>Internal APIs (Shadow APIs)</h2>
+    <ul>
+        <li>GET /api/internal/admin/users</li>
+        <li>GET /api/internal/debug/config</li>
+        <li>GET /api/internal/stats</li>
+        <li>POST /api/internal/execute</li>
+    </ul>
+</body>
+</html>
+    ''')
+
+
+# 추가 Shadow API 엔드포인트
+@app.route('/api/internal/stats', methods=['GET'])
+def internal_stats():
+    """숨겨진 통계 API"""
+    return jsonify({
+        'total_users': 150,
+        'active_sessions': 42,
+        'server_load': 0.65,
+        'database_size': '2.3GB',
+        'last_backup': '2025-10-13 10:30:00'
+    })
+
+
+@app.route('/api/internal/execute', methods=['POST'])
+def internal_execute():
+    """위험한 내부 실행 API"""
+    command = request.json.get('command', '')
+    # 취약점: 명령어 실행 (실제로는 실행하지 않음)
+    return jsonify({
+        'status': 'executed',
+        'command': command,
+        'warning': 'This is a dangerous endpoint!'
+    })
+
+
 # 취약한 파일 업로드
 @app.route('/api/v1/upload', methods=['POST'])
 def upload_file():
@@ -211,8 +368,8 @@ def delete_user():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("⚠️  취약한 테스트 애플리케이션 시작")
-    print("⚠️  이 앱은 의도적으로 취약점을 포함하고 있습니다")
-    print("⚠️  절대 프로덕션 환경에서 사용하지 마세요!")
+    print("[WARNING] Vulnerable Test Application Starting")
+    print("[WARNING] This app contains intentional vulnerabilities")
+    print("[WARNING] Never use in production!")
     print("=" * 60)
     app.run(host='0.0.0.0', port=5000, debug=True)

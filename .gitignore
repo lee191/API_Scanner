@@ -22,9 +22,8 @@ wheels/
 
 # Virtual Environment
 venv/
-env/
 ENV/
-.venv
+env/
 
 # IDE
 .vscode/
@@ -33,29 +32,25 @@ ENV/
 *.swo
 *~
 
-# Output
+# Project Specific
+data/
 output/
+*.db
+*.db-journal
 .env
-.env.local
-reports/
-*.log
+temp/
+test_bruteforce/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Sensitive
-*.key
-*.pem
-*.crt
-secrets/
-.env
+# Logs
+*.log
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# mitmproxy
-~/.mitmproxy/
-mitm*.pem
+# Backup files
+*.backup
+*.bak
+*.old
+ground_truth_old.json
+ground_truth_complete.json

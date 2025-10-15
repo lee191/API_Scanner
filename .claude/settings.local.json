@@ -30,7 +30,11 @@
       "Bash(taskkill:*)",
       "Bash(dir output:*)",
       "Bash(npm run build)",
-      "Bash(dir /s /b web-uisrcappapi)"
+      "Bash(dir /s /b web-uisrcappapi)",
+      "Bash(dir:*)",
+      "Bash(timeout 60 python main.py full-scan http://localhost:5000 --js-path test-app/static)",
+      "Bash(find:*)",
+      "Bash(chmod:*)"
     ],
     "deny": [],
     "ask": []

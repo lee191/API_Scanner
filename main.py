@@ -2,10 +2,24 @@
 
 import click
 import sys
-from datetime import datetime
+import io
+import os
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+# Korea Standard Time (UTC+9)
+KST = timezone(timedelta(hours=9))
+
+def get_kst_now():
+    """Get current time in KST."""
+    return datetime.now(KST)
 from colorama import init, Fore, Style
 from tqdm import tqdm
+
+# Set UTF-8 encoding for stdout/stderr on Windows
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 from src.proxy.capture import ProxyRunner
 from src.analyzer.js_analyzer import JSAnalyzer
@@ -95,7 +109,7 @@ def analyze(path, base_url, recursive):
     # Save results
     scan_result = ScanResult(
         target=str(path),
-        scan_start=datetime.now(),
+        scan_start=get_kst_now(),
         endpoints=all_endpoints
     )
     scan_result.finalize()
@@ -115,7 +129,7 @@ def scan(url, timeout, skip_scan):
     # Create scan result
     scan_result = ScanResult(
         target=url,
-        scan_start=datetime.now()
+        scan_start=get_kst_now()
     )
 
     # TODO: Implement URL crawling and endpoint discovery
@@ -163,7 +177,7 @@ def full_scan(target, js_path, scan_vulns, bruteforce, wordlist, output):
 
     scan_result = ScanResult(
         target=target,
-        scan_start=datetime.now()
+        scan_start=get_kst_now()
     )
 
     collector = EndpointCollector()
@@ -243,24 +257,47 @@ def full_scan(target, js_path, scan_vulns, bruteforce, wordlist, output):
             print(f"{Fore.YELLOW}    - High: {vuln_stats['high']}개{Style.RESET_ALL}")
         print()
 
-        # Generate PoC code for vulnerabilities using AI
-        if scan_result.vulnerabilities:
-            try:
-                from src.analyzer.ai_analyzer import AIJSAnalyzer
-                print(f"{Fore.CYAN}[*] AI를 사용하여 취약점 PoC 코드 생성 중...{Style.RESET_ALL}")
-                ai_analyzer = AIJSAnalyzer()
-                if ai_analyzer.enabled:
-                    scan_result.vulnerabilities = ai_analyzer.generate_vulnerability_poc(scan_result.vulnerabilities)
-                    poc_count = sum(1 for v in scan_result.vulnerabilities if v.poc_code)
-                    print(f"{Fore.GREEN}  [OK] PoC 코드 생성 완료: {poc_count}개{Style.RESET_ALL}\n")
-                else:
-                    print(f"{Fore.YELLOW}  [!] AI 기능이 비활성화되어 PoC 코드를 생성하지 않습니다{Style.RESET_ALL}\n")
-            except Exception as e:
-                print(f"{Fore.YELLOW}  [!] PoC 코드 생성 중 오류: {e}{Style.RESET_ALL}\n")
+        # PoC 생성은 웹 UI에서 사용자가 선택한 취약점에 대해서만 수행
+        # 자동 생성은 비활성화 (Web UI의 "PoC 생성" 버튼 사용)
+        print(f"{Fore.CYAN}[*] PoC 코드는 Web UI에서 개별적으로 생성할 수 있습니다{Style.RESET_ALL}\n")
 
     # Add endpoints to result
     scan_result.endpoints = collector.get_endpoints()
     scan_result.finalize()
+
+    # Save to database
+    try:
+        from src.database.connection import get_db, init_db
+        from src.database.repository import ScanRepository
+        from uuid import uuid4
+        
+        # Initialize database
+        init_db()
+        
+        # Save scan result to database
+        with get_db() as db:
+            scan_id = str(uuid4())
+            scan = ScanRepository.create_scan(
+                db=db,
+                scan_id=scan_id,
+                target_url=target,
+                js_path=js_path,
+                scan_vulns=scan_vulns,
+                ai_enabled=os.getenv('AI_ANALYSIS_ENABLED', 'true').lower() == 'true',
+                bruteforce_enabled=bruteforce,
+                analysis_type='full_scan'
+            )
+            
+            # Save scan result
+            ScanRepository.save_scan_result(
+                db=db,
+                scan_id=scan_id,
+                scan_result=scan_result
+            )
+            
+            print(f"{Fore.GREEN}  [OK] 데이터베이스 저장 완료 (scan_id: {scan_id}){Style.RESET_ALL}")
+    except Exception as e:
+        print(f"{Fore.YELLOW}  [!] 데이터베이스 저장 실패: {e}{Style.RESET_ALL}")
 
     # Generate reports
     print(f"{Fore.CYAN}[4/4] 리포트 생성 중...{Style.RESET_ALL}")

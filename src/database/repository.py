@@ -1,12 +1,19 @@
 """Database repository for CRUD operations."""
 
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from uuid import uuid4
 
-from src.database.models import Project, Scan, Endpoint, Vulnerability, ScanStatus, VulnerabilitySeverity
+from src.database.models import Project, Scan, Endpoint, Vulnerability, DiscoveredPath, ScanStatus, VulnerabilitySeverity
+
+# Korea Standard Time (UTC+9)
+KST = timezone(timedelta(hours=9))
+
+def get_kst_now():
+    """Get current time in KST."""
+    return datetime.now(KST)
 from src.utils.models import ScanResult, APIEndpoint, Vulnerability as VulnModel
 from src.scanner.vulnerability_scanner import VulnerabilityScanner
 
@@ -55,7 +62,7 @@ class ProjectRepository:
                 project.name = name
             if description is not None:
                 project.description = description
-            project.updated_at = datetime.utcnow()
+            project.updated_at = get_kst_now()
             db.commit()
             db.refresh(project)
         return project
@@ -87,7 +94,8 @@ class ProjectRepository:
                     'total_endpoints': scan.total_endpoints,
                     'shadow_apis': scan.shadow_apis,
                     'public_apis': scan.public_apis,
-                    'total_vulnerabilities': scan.total_vulnerabilities
+                    'total_vulnerabilities': scan.total_vulnerabilities,
+                    'discovered_paths': len(scan.discovered_paths) if scan.discovered_paths else 0
                 }
             }
             for scan in project.scans
@@ -166,9 +174,9 @@ class ScanRepository:
             scan.message = message
 
             if status == ScanStatus.RUNNING and not scan.started_at:
-                scan.started_at = datetime.utcnow()
+                scan.started_at = get_kst_now()
             elif status == ScanStatus.COMPLETED or status == ScanStatus.FAILED:
-                scan.completed_at = datetime.utcnow()
+                scan.completed_at = get_kst_now()
 
             db.commit()
             db.refresh(scan)
@@ -195,7 +203,7 @@ class ScanRepository:
         scan.status = ScanStatus.COMPLETED
         scan.progress = 100
         scan.message = 'Scan completed successfully'
-        scan.completed_at = datetime.utcnow()
+        scan.completed_at = get_kst_now()
 
         # Save endpoints
         for ep in scan_result.endpoints:
@@ -230,6 +238,18 @@ class ScanRepository:
             )
             db.add(vulnerability)
 
+        # Save discovered paths (from bruteforce)
+        if hasattr(scan_result, 'discovered_paths') and scan_result.discovered_paths:
+            for path_data in scan_result.discovered_paths:
+                discovered_path = DiscoveredPath(
+                    scan_id=scan.id,
+                    path=path_data.get('path', ''),
+                    status_code=path_data.get('status_code', 0),
+                    content_length=path_data.get('content_length'),
+                    content_type=path_data.get('content_type')
+                )
+                db.add(discovered_path)
+
         db.commit()
         db.refresh(scan)
         return scan
@@ -254,6 +274,9 @@ class ScanRepository:
         # Add vulnerabilities
         vulnerabilities = [v.to_dict() for v in scan.vulnerabilities]
 
+        # Add discovered paths
+        discovered_paths = [dp.to_dict() for dp in scan.discovered_paths]
+
         # Build result dictionary with nested structure for frontend
         result = {
             'scan_id': scan.scan_id,
@@ -268,12 +291,14 @@ class ScanRepository:
                     'total_endpoints': scan.total_endpoints,
                     'shadow_apis': scan.shadow_apis,
                     'public_apis': scan.public_apis,
-                    'total_vulnerabilities': scan.total_vulnerabilities
+                    'total_vulnerabilities': scan.total_vulnerabilities,
+                    'discovered_paths': len(discovered_paths)
                 },
                 'shadow_apis': shadow_apis,
                 'public_apis': public_apis,
                 'endpoints': shadow_apis + public_apis,
-                'vulnerabilities': vulnerabilities
+                'vulnerabilities': vulnerabilities,
+                'discovered_paths': discovered_paths
             }
         }
 
@@ -299,7 +324,8 @@ class ScanRepository:
                         'total_endpoints': scan.total_endpoints,
                         'shadow_apis': scan.shadow_apis,
                         'public_apis': scan.public_apis,
-                        'total_vulnerabilities': scan.total_vulnerabilities
+                        'total_vulnerabilities': scan.total_vulnerabilities,
+                        'discovered_paths': len(scan.discovered_paths) if scan.discovered_paths else 0
                     }
                 }
             }

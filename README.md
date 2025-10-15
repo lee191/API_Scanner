@@ -1,244 +1,181 @@
 # 🔍 Shadow API Scanner
 
-웹 애플리케이션의 숨겨진/문서화되지 않은 API를 탐색하고 보안 취약점을 분석하는 모의 침투 테스트 도구
+> 웹 애플리케이션의 숨겨진 API를 탐색하고 보안 취약점을 분석하는 모의 침투 테스트 도구
 
-## 🎯 주요 기능
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-14.2-black.svg)](https://nextjs.org/)
+[![License](https://img.shields.io/badge/License-Educational-green.svg)](LICENSE)
 
-- **🌐 네트워크 트래픽 분석**: mitmproxy를 사용한 HTTP/HTTPS 트래픽 캡처
-- **📜 JavaScript 정적 분석**: JS 파일에서 API 엔드포인트 자동 추출
-- **📊 API 엔드포인트 수집**: 중복 제거 및 정규화된 엔드포인트 목록
-- **🛡️ 보안 취약점 스캔**: OWASP Top 10 기반 취약점 탐지
-  - 인증/권한 검사
-  - CORS 오구성
-  - 민감 데이터 노출
-  - SQL Injection
-  - XSS
-  - Rate Limiting
-- **📄 다양한 리포트 형식**: JSON, HTML, Markdown 리포트 생성
+## 📋 개요
 
-## 📦 설치
+Shadow API Scanner는 자동화된 API 탐색 및 보안 취약점 분석 도구입니다.
 
-### 요구사항
+- 🔍 **Shadow API 자동 발견**: JavaScript 정적 분석 + AI 기반 패턴 인식
+- 🛡️ **OWASP Top 10 스캔**: SQL Injection, XSS, 인증 누락 등
+- 📊 **포괄적인 리포트**: JSON/HTML/Markdown 형식
+- 🌐 **현대적인 Web UI**: Next.js 기반 대시보드
+- 💾 **데이터베이스 통합**: 스캔 이력 및 프로젝트 관리
 
-- Python 3.8+
-- pip
+## 🚀 빠른 시작
 
-### 설치 방법
+### 설치
 
 ```bash
 # 저장소 클론
 git clone <repository-url>
-cd Shadow-API
+cd API_Scanner
 
-# 의존성 설치
+# Python 의존성 설치
 pip install -r requirements.txt
 
-# Playwright 브라우저 설치 (선택사항)
-playwright install
+# 데이터베이스 초기화
+python setup_db.py
+
+# (선택) Web UI 설정
+cd web-ui
+npm install
 ```
 
-## 🧪 테스트 환경 (권장)
+### 사용 방법
 
-취약한 테스트 웹 애플리케이션으로 도구를 테스트:
-
+#### CLI 모드
 ```bash
-# 1. 테스트 앱 시작 (Docker)
-# Windows
-docker-run.bat
-# Linux/Mac
-chmod +x docker-run.sh && ./docker-run.sh
-
-# 2. 빠른 테스트 (Windows)
-test-scripts\run-test.bat
-
-# 3. 빠른 테스트 (Linux/Mac)
-chmod +x test-scripts/run-test.sh
-./test-scripts/run-test.sh
-
-# 4. 수동 테스트
+# 전체 스캔
 python main.py full-scan http://localhost:5000 \
-    --js-path test-app/static --scan-vulns
-
-# 5. 정리
-# Windows: docker-stop.bat
-# Linux/Mac: ./docker-stop.sh
-```
-
-자세한 내용은 [TESTING.md](TESTING.md) 참조
-
-## 🚀 사용법
-
-### 1. 프록시 모드 - 네트워크 트래픽 캡처
-
-```bash
-python main.py proxy --host 127.0.0.1 --port 8080
-```
-
-브라우저 프록시 설정:
-- 호스트: 127.0.0.1
-- 포트: 8080
-- HTTPS 프록시 활성화
-
-웹 애플리케이션을 탐색하면 모든 API 호출이 자동으로 캡처됩니다.
-
-### 2. JavaScript 분석 모드
-
-단일 파일 분석:
-```bash
-python main.py analyze app.js --base-url https://example.com
-```
-
-디렉토리 분석 (재귀):
-```bash
-python main.py analyze ./src --base-url https://example.com --recursive
-```
-
-### 3. 전체 스캔 (권장)
-
-```bash
-python main.py full-scan https://example.com \
-  --js-path ./javascript \
+  --js-path ./static \
   --scan-vulns \
-  --output ./reports
+  --bruteforce
 ```
 
-옵션:
-- `--js-path`: JavaScript 파일/디렉토리 경로
-- `--scan-vulns`: 취약점 스캔 수행 (기본: true)
-- `--no-scan-vulns`: 취약점 스캔 건너뛰기
-- `--output`: 리포트 출력 디렉토리
+#### Web UI 모드
+```bash
+# Terminal 1: API 서버
+python api_server.py
 
-## 📊 출력 예시
-
-### 콘솔 출력
-
-```
-╔═══════════════════════════════════════════════════════════╗
-║                                                           ║
-║              🔍 Shadow API Scanner v1.0                  ║
-║         Penetration Testing Tool for API Discovery       ║
-║                                                           ║
-╚═══════════════════════════════════════════════════════════╝
-
-[*] 전체 스캔 시작: https://example.com
-
-[1/3] JavaScript 분석 중...
-파일 분석: 100%|████████████████████| 45/45 [00:12<00:00]
-  ✓ 발견된 엔드포인트: 87개
-
-[2/3] 보안 취약점 스캔 중...
-엔드포인트 스캔: 100%|████████████████████| 87/87 [01:23<00:00]
-  ✓ 발견된 취약점: 12개
-    - Critical: 2개
-    - High: 5개
-
-[3/3] 리포트 생성 중...
-[+] JSON report: output/full_scan_20250101_120000.json
-[+] HTML report: output/full_scan_20250101_120000.html
-[+] Markdown report: output/full_scan_20250101_120000.md
-
-============================================================
-[✓] 스캔 완료!
-
-📊 결과 요약:
-  • 엔드포인트: 87개
-  • 취약점: 12개
-
-📁 생성된 리포트:
-  • JSON: output/full_scan_20250101_120000.json
-  • HTML: output/full_scan_20250101_120000.html
-  • MARKDOWN: output/full_scan_20250101_120000.md
-============================================================
+# Terminal 2: Web UI
+cd web-ui
+npm run dev
 ```
 
-### HTML 리포트
+브라우저에서 http://localhost:3000 접속
 
-HTML 리포트는 아름답게 포맷된 대시보드 형태로 생성됩니다:
-- 📊 통계 대시보드
-- 🌐 발견된 API 엔드포인트 목록
-- 🛡️ 보안 취약점 상세 정보
-- 💡 권장사항
+## 📖 문서
+
+**완전한 문서는 [DOCUMENTATION.md](DOCUMENTATION.md)를 참조하세요.**
+
+포함 내용:
+- 상세 설치 가이드
+- 아키텍처 및 모듈 설명
+- API 참조
+- AI 기능 활용법
+- 데이터베이스 스키마
+- 테스트 가이드
+- 문제 해결 방법
+
+## 🎯 주요 기능
+
+### API 탐색
+- ✅ JavaScript 정적 분석 (Regex + AST)
+- ✅ AI 기반 고급 패턴 인식 (OpenAI GPT)
+- ✅ 디렉토리 브루트포싱 (Wordlist 기반)
+- ✅ 네트워크 트래픽 캡처 (mitmproxy)
+
+### 보안 취약점 스캔
+- 🔴 SQL Injection (CWE-89)
+- 🔴 XSS (CWE-79)
+- 🟠 Missing Authentication (CWE-306)
+- 🟠 CORS Misconfiguration (CWE-942)
+- 🟠 Sensitive Data Exposure (CWE-200)
+- 🟡 Missing Rate Limiting (CWE-770)
+
+### 리포팅 및 PoC 생성
+- 📄 JSON (구조화된 데이터)
+- 📄 HTML (시각화된 대시보드)
+- 📄 Markdown (문서화 친화적)
+- 🎨 **선택적 PoC 코드 생성** (AI 기반 / 템플릿 기반)
+  - ✨ **NEW**: Web UI에서 버튼 클릭으로 원하는 취약점만 PoC 생성
+  - 💰 비용 효율적: 필요한 취약점만 선택적으로 생성
+  - 🚀 빠른 생성: 개별 생성 (3-5초) 또는 일괄 생성
+  - 📋 코드 복사: 생성된 PoC 즉시 복사 가능
+
+## 🧪 테스트
+
+```bash
+# 테스트 앱 시작 (Docker)
+./docker-run.sh        # Linux/Mac
+docker-run.bat         # Windows
+
+# 자동 통합 테스트
+./test-scripts/run-test.sh      # Linux/Mac
+test-scripts\run-test.bat       # Windows
+
+# 수동 테스트
+python main.py full-scan http://localhost:5000 \
+  --js-path test-app/static \
+  --scan-vulns
+```
+
+## 📊 예상 결과
+
+테스트 앱 (test-app) 스캔 시:
+- **엔드포인트**: 15+ 개 발견
+- **Shadow APIs**: 5+ 개 탐지
+- **취약점**: 20+ 개 발견
+  - Critical: 2+ (SQL Injection)
+  - High: 8+ (인증 누락, XSS 등)
+  - Medium: 10+ (Rate Limiting 등)
+- **실행 시간**: 60-90초
 
 ## 🏗️ 프로젝트 구조
 
 ```
-Shadow-API/
-├── src/
-│   ├── proxy/              # 프록시 서버 및 트래픽 캡처
-│   │   ├── capture.py
-│   │   └── __init__.py
-│   ├── analyzer/           # JavaScript 정적 분석
-│   │   ├── js_analyzer.py
-│   │   ├── endpoint_collector.py
-│   │   └── __init__.py
-│   ├── scanner/            # 보안 취약점 스캐너
-│   │   ├── vulnerability_scanner.py
-│   │   └── __init__.py
-│   ├── reporter/           # 리포트 생성
-│   │   ├── report_generator.py
-│   │   └── __init__.py
-│   └── utils/              # 공통 유틸리티
-│       ├── models.py
-│       ├── config.py
-│       └── __init__.py
-├── config/
-│   └── config.yaml         # 설정 파일
-├── output/                 # 리포트 출력 디렉토리
-├── tests/                  # 테스트
+API_Scanner/
 ├── main.py                 # CLI 진입점
-├── requirements.txt        # Python 의존성
-└── README.md
+├── api_server.py           # Flask API 서버
+├── setup_db.py             # 데이터베이스 초기화
+├── DOCUMENTATION.md        # 📖 완전한 문서
+├── src/
+│   ├── proxy/              # 프록시 캡처
+│   ├── crawler/            # JS 수집 + 브루트포싱
+│   ├── analyzer/           # JS 분석 (Regex + AI)
+│   ├── scanner/            # 취약점 스캐너
+│   ├── reporter/           # 리포트 생성
+│   ├── database/           # DB 모델 및 Repository
+│   └── utils/              # 공통 유틸리티
+├── web-ui/                 # Next.js Web UI
+├── test-app/               # 취약한 테스트 앱
+├── test-scripts/           # 통합 테스트 스크립트
+├── config/                 # 설정 파일
+├── output/                 # 리포트 출력 (gitignored)
+└── data/                   # 데이터베이스 파일 (gitignored)
 ```
 
 ## ⚙️ 설정
 
-`config/config.yaml` 파일에서 설정을 커스터마이즈할 수 있습니다:
+### 환경 변수 (.env)
+```bash
+# Database
+DATABASE_URL=sqlite:///data/scanner.db
 
-```yaml
-# 프록시 설정
-proxy:
-  host: "127.0.0.1"
-  port: 8080
-  timeout: 30
-
-# JavaScript 분석 패턴
-js_analysis:
-  patterns:
-    - "fetch("
-    - "axios."
-    - "XMLHttpRequest"
-
-# 취약점 스캐너 설정
-scanner:
-  checks:
-    - authentication
-    - authorization
-    - cors
-    - sql_injection
-    - xss
-  timeout: 10
-  max_retries: 3
-
-# 출력 설정
-output:
-  directory: "output"
-  formats:
-    - "json"
-    - "html"
-    - "markdown"
+# OpenAI (선택)
+OPENAI_API_KEY=sk-your-key-here
+AI_ANALYSIS_ENABLED=true
 ```
 
-## 🛡️ 탐지 가능한 취약점
+### 설정 파일 (config/config.yaml)
+```yaml
+scanner:
+  timeout: 10
+  checks:
+    - authentication
+    - sql_injection
+    - xss
+    - cors
+```
 
-| 취약점 유형 | 심각도 | CWE |
-|------------|--------|-----|
-| Missing Authentication | HIGH | CWE-306 |
-| Insecure Authentication | HIGH | CWE-319 |
-| CORS Misconfiguration | HIGH/MEDIUM | CWE-942 |
-| Sensitive Data Exposure | HIGH/MEDIUM | CWE-200 |
-| SQL Injection | CRITICAL | CWE-89 |
-| XSS (Cross-Site Scripting) | HIGH | CWE-79 |
-| Missing Rate Limiting | MEDIUM | CWE-770 |
+## 🤝 기여
+
+버그 리포트, 기능 제안, 풀 리퀘스트를 환영합니다!
 
 ## 🔒 법적 고지사항
 
@@ -246,34 +183,18 @@ output:
 
 - ✅ 자신이 소유하거나 명시적 허가를 받은 시스템에만 사용
 - ✅ 모의 침투 테스트 및 보안 평가 목적
-- ✅ 취약점 발견 및 수정을 위한 교육적 목적
 - ❌ 무단 접근, 데이터 탈취, 악의적 목적 사용 금지
 
 사용자는 이 도구의 사용으로 인한 모든 법적 책임을 집니다.
 
-## 🤝 기여
-
-버그 리포트, 기능 제안, 풀 리퀘스트를 환영합니다!
-
-## 📝 라이선스
-
-이 프로젝트는 교육 및 보안 연구 목적으로 제공됩니다.
-
-## 🔄 향후 계획
-
-- [ ] URL 크롤링 기능
-- [ ] WebSocket API 지원
-- [ ] GraphQL 엔드포인트 분석
-- [ ] API 문서 자동 생성
-- [ ] CI/CD 통합
-- [ ] Docker 이미지 제공
-- [ ] 추가 취약점 체크 (SSRF, XXE, etc.)
-- [ ] 머신러닝 기반 API 패턴 인식
-
 ## 📧 연락처
 
-문의사항이나 보안 이슈 발견 시 제보해주세요.
+- 📖 완전한 문서: [DOCUMENTATION.md](DOCUMENTATION.md)
+- 🐛 Issues: <repository-url>/issues
+- 🔒 Security: <security-email>
 
 ---
 
 **Shadow API Scanner** - 더 안전한 웹 애플리케이션을 위하여 🛡️
+
+**© 2024-2025 Shadow API Scanner Team**

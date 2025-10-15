@@ -1,9 +1,16 @@
 """Data models for Shadow API Scanner."""
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 from pydantic import BaseModel, HttpUrl, Field
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from enum import Enum
+
+# Korea Standard Time (UTC+9)
+KST = timezone(timedelta(hours=9))
+
+def get_kst_now():
+    """Get current time in KST."""
+    return datetime.now(KST)
 
 
 class HTTPMethod(str, Enum):
@@ -37,7 +44,7 @@ class APIEndpoint(BaseModel):
     poc_code: Optional[str] = None  # Proof of Concept code to test the endpoint
     status_code: Optional[int] = None
     source: str = "unknown"  # 'proxy', 'js_analysis'
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=get_kst_now)
 
     class Config:
         use_enum_values = True
@@ -54,7 +61,7 @@ class Vulnerability(BaseModel):
     recommendation: str
     poc_code: Optional[str] = None  # Proof of Concept code to exploit the vulnerability
     cwe_id: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=get_kst_now)
 
     class Config:
         use_enum_values = True
@@ -67,7 +74,7 @@ class ScanResult(BaseModel):
     scan_end: Optional[datetime] = None
     endpoints: List[APIEndpoint] = Field(default_factory=list)
     vulnerabilities: List[Vulnerability] = Field(default_factory=list)
-    discovered_paths: List[str] = Field(default_factory=list)  # 브루트포싱으로 발견된 경로
+    discovered_paths: List[Dict[str, Any]] = Field(default_factory=list)  # 브루트포싱으로 발견된 경로 (상세 정보 포함)
     statistics: Dict[str, int] = Field(default_factory=dict)
 
     def add_endpoint(self, endpoint: APIEndpoint):
@@ -80,7 +87,7 @@ class ScanResult(BaseModel):
 
     def finalize(self):
         """Finalize scan and calculate statistics."""
-        self.scan_end = datetime.now()
+        self.scan_end = get_kst_now()
         self.statistics = {
             "total_endpoints": len(self.endpoints),
             "total_vulnerabilities": len(self.vulnerabilities),

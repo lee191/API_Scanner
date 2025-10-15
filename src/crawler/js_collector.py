@@ -4,7 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from pathlib import Path
-from typing import List, Set, Optional
+from typing import List, Set, Optional, Dict, Any
 import re
 import time
 
@@ -37,7 +37,7 @@ class JSCollector:
         })
         self.js_urls: Set[str] = set()
         self.js_contents: dict = {}
-        self.discovered_paths: List[str] = []
+        self.discovered_paths: List[Dict[str, Any]] = []
 
         # 디렉토리 브루트포서 초기화
         if enable_bruteforce:
@@ -135,7 +135,8 @@ class JSCollector:
         # 3. 발견된 각 경로에서 JS 파일 수집
         if self.discovered_paths:
             print(f"\n[*] 발견된 {len(self.discovered_paths)}개 경로에서 JS 파일 수집 중...")
-            for i, path_url in enumerate(self.discovered_paths, 1):
+            for i, path_info in enumerate(self.discovered_paths, 1):
+                path_url = path_info['path']
                 print(f"\n[{i}/{len(self.discovered_paths)}] 크롤링: {path_url}")
                 try:
                     self.collect_from_page(path_url)

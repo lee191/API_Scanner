@@ -1,6 +1,6 @@
 """Database models for Shadow API Scanner."""
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, JSON, Enum as SQLEnum
 from sqlalchemy.ext.declarative import declarative_base
@@ -8,6 +8,13 @@ from sqlalchemy.orm import relationship
 import enum
 
 Base = declarative_base()
+
+# Korea Standard Time (UTC+9)
+KST = timezone(timedelta(hours=9))
+
+def get_kst_now():
+    """Get current time in KST."""
+    return datetime.now(KST)
 
 
 class ScanStatus(enum.Enum):
@@ -37,8 +44,8 @@ class Project(Base):
     description = Column(Text, nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=get_kst_now, nullable=False)
+    updated_at = Column(DateTime, default=get_kst_now, onupdate=get_kst_now)
 
     # Relationships
     scans = relationship("Scan", back_populates="project", cascade="all, delete-orphan")
@@ -82,7 +89,7 @@ class Scan(Base):
     total_vulnerabilities = Column(Integer, default=0)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=get_kst_now, nullable=False)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
 
@@ -93,6 +100,7 @@ class Scan(Base):
     project = relationship("Project", back_populates="scans")
     endpoints = relationship("Endpoint", back_populates="scan", cascade="all, delete-orphan")
     vulnerabilities = relationship("Vulnerability", back_populates="scan", cascade="all, delete-orphan")
+    discovered_paths = relationship("DiscoveredPath", back_populates="scan", cascade="all, delete-orphan")
 
     def to_dict(self):
         """Convert to dictionary."""
@@ -144,7 +152,7 @@ class Endpoint(Base):
     status_code = Column(Integer, nullable=True)
     source = Column(String(200), nullable=True)
 
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=get_kst_now)
 
     # Relationship
     scan = relationship("Scan", back_populates="endpoints")
@@ -188,7 +196,7 @@ class Vulnerability(Base):
 
     cwe_id = Column(String(20), nullable=True)
 
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=get_kst_now)
 
     # Relationship
     scan = relationship("Scan", back_populates="vulnerabilities")
@@ -206,5 +214,34 @@ class Vulnerability(Base):
             'recommendation': self.recommendation,
             'poc_code': self.poc_code,
             'cwe_id': self.cwe_id,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None
+        }
+
+
+class DiscoveredPath(Base):
+    """Discovered Path model (from directory bruteforce)."""
+    __tablename__ = 'discovered_paths'
+
+    id = Column(Integer, primary_key=True)
+    scan_id = Column(Integer, ForeignKey('scans.id'), nullable=False, index=True)
+
+    path = Column(String(1000), nullable=False)
+    status_code = Column(Integer, nullable=False)
+    content_length = Column(Integer, nullable=True)
+    content_type = Column(String(200), nullable=True)
+
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    # Relationship
+    scan = relationship("Scan", back_populates="discovered_paths")
+
+    def to_dict(self):
+        """Convert to dictionary."""
+        return {
+            'id': self.id,
+            'path': self.path,
+            'status_code': self.status_code,
+            'content_length': self.content_length,
+            'content_type': self.content_type,
             'timestamp': self.timestamp.isoformat() if self.timestamp else None
         }

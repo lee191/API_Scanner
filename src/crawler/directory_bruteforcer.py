@@ -3,7 +3,7 @@
 import os
 import requests
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Dict, Any
 from urllib.parse import urljoin, urlparse
 import urllib3
 
@@ -36,7 +36,8 @@ class DirectoryBruteForcer:
         """
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout
-        self.discovered_paths: Set[str] = set()
+        self.discovered_paths: List[Dict[str, Any]] = []
+        self.discovered_urls: Set[str] = set()  # URL 중복 체크용
 
         # 기본 wordlist 경로 설정
         if wordlist_path is None:
@@ -76,7 +77,7 @@ class DirectoryBruteForcer:
         print(f"[*] Wordlist 로드 완료: {len(paths)}개 경로")
         return paths
 
-    def test_path(self, path: str) -> bool:
+    def test_path(self, path: str) -> Dict[str, Any]:
         """
         특정 경로가 존재하는지 테스트합니다.
 
@@ -84,7 +85,7 @@ class DirectoryBruteForcer:
             path: 테스트할 경로 (예: /admin, /api/v1)
 
         Returns:
-            경로가 존재하면 True, 아니면 False
+            발견된 경로 정보 딕셔너리 또는 None
         """
         url = urljoin(self.base_url, path)
 
@@ -97,8 +98,17 @@ class DirectoryBruteForcer:
             )
 
             if response.status_code in self.VALID_STATUS_CODES:
+                content_length = len(response.content) if response.content else 0
+                content_type = response.headers.get('Content-Type', 'unknown')
+                
                 print(f"[+] 경로 발견: {path} (Status: {response.status_code})")
-                return True
+                
+                return {
+                    'path': url,
+                    'status_code': response.status_code,
+                    'content_length': content_length,
+                    'content_type': content_type
+                }
 
         except requests.exceptions.Timeout:
             print(f"[!] 타임아웃: {path}")
@@ -106,9 +116,9 @@ class DirectoryBruteForcer:
             # 연결 실패는 조용히 처리 (404 등)
             pass
 
-        return False
+        return None
 
-    def brute_force(self, max_paths: int = None) -> List[str]:
+    def brute_force(self, max_paths: int = None) -> List[Dict[str, Any]]:
         """
         Wordlist를 사용하여 디렉토리 브루트포싱을 수행합니다.
 
@@ -116,7 +126,7 @@ class DirectoryBruteForcer:
             max_paths: 최대 테스트할 경로 수 (None이면 전체)
 
         Returns:
-            발견된 경로 리스트
+            발견된 경로 정보 리스트
         """
         paths = self.load_wordlist()
 
@@ -131,25 +141,28 @@ class DirectoryBruteForcer:
         print(f"[*] 테스트할 경로: {len(paths)}개")
 
         for i, path in enumerate(paths, 1):
-            if self.test_path(path):
-                full_url = urljoin(self.base_url, path)
-                self.discovered_paths.add(full_url)
+            path_info = self.test_path(path)
+            if path_info:
+                # URL 중복 체크
+                if path_info['path'] not in self.discovered_urls:
+                    self.discovered_urls.add(path_info['path'])
+                    self.discovered_paths.append(path_info)
 
             # 진행 상황 표시 (10개마다)
             if i % 10 == 0:
                 print(f"[*] 진행: {i}/{len(paths)} ({len(self.discovered_paths)}개 발견)")
 
         print(f"[+] 브루트포싱 완료: 총 {len(self.discovered_paths)}개 경로 발견")
-        return list(self.discovered_paths)
+        return self.discovered_paths
 
-    def get_discovered_paths(self) -> List[str]:
+    def get_discovered_paths(self) -> List[Dict[str, Any]]:
         """
         발견된 모든 경로를 반환합니다.
 
         Returns:
-            발견된 경로 URL 리스트
+            발견된 경로 정보 리스트
         """
-        return list(self.discovered_paths)
+        return self.discovered_paths
 
 
 def main():

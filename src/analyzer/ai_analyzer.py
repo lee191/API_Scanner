@@ -1,6 +1,7 @@
 """AI-powered JavaScript analysis using OpenAI."""
 
 import os
+import re
 import json
 from typing import List, Dict, Optional
 from openai import OpenAI
@@ -126,7 +127,7 @@ Return JSON format (MANDATORY fields):
       "parameters": {{}},
       "is_shadow_api": false,
       "description": "Get list of users",
-      "poc_code": "import requests\\n\\nurl = 'http://target.com/api/v1/users'\\nresponse = requests.get(url)\\nprint(f'Status: {{response.status_code}}')\\nif response.status_code == 200:\\n    print(f'Response: {{response.json()}}')\\nelse:\\n    print(f'Error: {{response.text}}')"
+      "poc_code": "import requests\\n\\nurl = '{base_url}/api/v1/users'\\nresponse = requests.get(url)\\nprint(f'Status: {{response.status_code}}')\\nif response.status_code == 200:\\n    print(f'Response: {{response.json()}}')\\nelse:\\n    print(f'Error: {{response.text}}')"
     }},
     {{
       "url": "/api/internal/admin",
@@ -134,10 +135,12 @@ Return JSON format (MANDATORY fields):
       "parameters": {{"action": "string"}},
       "is_shadow_api": true,
       "description": "Internal admin endpoint",
-      "poc_code": "import requests\\n\\nurl = 'http://target.com/api/internal/admin'\\ndata = {{'action': 'test'}}\\nresponse = requests.post(url, json=data)\\nprint(f'Status: {{response.status_code}}')\\nif response.status_code == 200:\\n    print(f'Response: {{response.json()}}')\\nelse:\\n    print(f'Error: {{response.text}}')"
+      "poc_code": "import requests\\n\\nurl = '{base_url}/api/internal/admin'\\ndata = {{'action': 'test'}}\\nresponse = requests.post(url, json=data)\\nprint(f'Status: {{response.status_code}}')\\nif response.status_code == 200:\\n    print(f'Response: {{response.json()}}')\\nelse:\\n    print(f'Error: {{response.text}}')"
     }}
   ]
 }}
+
+CRITICAL: Use the actual base URL ({base_url}) in PoC code, NOT a hardcoded 'http://target.com'.
 
 Important:
 - Include ALL discovered endpoints
@@ -169,6 +172,19 @@ Important:
 
                 # Build complete URL
                 url = ep.get('url', '')
+
+                # Clean up malformed URLs (fix :param at start)
+                if url.startswith(':'):
+                    # Remove leading :param/ pattern
+                    url = re.sub(r'^:param/?', '/', url)
+                    # Also handle :anything/ pattern at start
+                    url = re.sub(r'^:[^/]+/?', '/', url)
+
+                # Ensure URL starts with / if it's a path
+                if url and not url.startswith('/') and not url.startswith('http'):
+                    url = '/' + url
+
+                # Build absolute URL
                 if url.startswith('/') and base_url:
                     url = base_url.rstrip('/') + url
 
@@ -296,33 +312,82 @@ Return JSON:
         try:
             # Process vulnerabilities in batches to avoid token limits
             for vuln in vulnerabilities[:10]:  # Limit to first 10 to manage costs
-                prompt = f"""Generate a Proof of Concept (PoC) code to demonstrate this security vulnerability.
+                prompt = f"""Generate a professional, production-ready Proof of Concept (PoC) code for this security vulnerability.
 
-Vulnerability Details:
-- Type: {vuln.type}
-- Severity: {vuln.level}
-- Endpoint: {vuln.method} {vuln.endpoint}
-- Description: {vuln.description}
-- Evidence: {vuln.evidence}
+═══════════════════════════════════════════════════════════
+VULNERABILITY CONTEXT
+═══════════════════════════════════════════════════════════
+Type: {vuln.type}
+Severity: {vuln.level}
+Target: {vuln.method} {vuln.endpoint}
+Description: {vuln.description}
+Evidence: {vuln.evidence}
+CWE: {vuln.cwe_id}
 
-Requirements:
-1. Write Python code using the requests library
-2. Include clear comments explaining each step
-3. Add error handling and output formatting
-4. Show how to exploit the vulnerability safely (for testing purposes only)
-5. Include authentication if needed
-6. Demonstrate the vulnerability clearly with expected vs actual behavior
-7. Replace ALL template variables with actual example values:
-   - Replace ${{id}}, ${{userId}}, ${{postId}} etc. with actual numbers (e.g., 123, 456)
-   - Replace :id, :userId, :postId in URLs with actual numbers
-   - Replace ${{name}}, ${{username}} with actual strings (e.g., 'testuser', 'example')
-   - NO template variables should remain in the code
+═══════════════════════════════════════════════════════════
+REQUIREMENTS FOR HIGH-QUALITY PoC
+═══════════════════════════════════════════════════════════
 
-IMPORTANT:
-- This is for defensive security testing only. Add appropriate warnings.
-- Use actual concrete values instead of template variables
+🎯 CODE STRUCTURE:
+1. Professional header with vulnerability details and disclaimer
+2. Configurable constants (TARGET_URL, TIMEOUT, VERIFY_SSL)
+3. Color-coded output using colorama (red=vulnerable, green=safe, yellow=info)
+4. Main exploit function with clear logic flow
+5. Helper functions for specific tasks
+6. Comprehensive error handling with specific exception types
+7. Results summary with actionable recommendations
 
-Return ONLY the Python code, no explanation needed."""
+🔬 TESTING METHODOLOGY:
+1. Baseline test (normal request to establish expected behavior)
+2. Multiple payload variants (at least 3-5 different approaches)
+3. Response validation (status codes, headers, body content)
+4. Success criteria with detailed evidence collection
+5. Time-based checks for blind vulnerabilities
+6. Cleanup/restoration where applicable
+
+📊 OUTPUT QUALITY:
+1. Clear progress indicators for each test phase
+2. Detailed logging of requests and responses
+3. Visual separation between test cases (using boxes/lines)
+4. Exploit success probability score (0-100%)
+5. Specific remediation steps based on test results
+6. Export results to JSON file for documentation
+
+⚙️ TECHNICAL EXCELLENCE:
+1. Use session objects for connection reuse
+2. Implement retry logic with exponential backoff
+3. Add request/response timing measurements
+4. Include SSL/TLS verification toggle
+5. Support proxy configuration for Burp Suite integration
+6. Add verbose mode flag for debugging
+7. Handle edge cases (timeouts, redirects, encoding issues)
+
+🛡️ SECURITY BEST PRACTICES:
+1. Add prominent warning banner about legal usage
+2. Rate limiting to avoid DoS
+3. Sanitize sensitive data in output
+4. Request confirmation before running destructive tests
+5. Log all activities for audit trail
+
+═══════════════════════════════════════════════════════════
+SPECIFIC ATTACK SCENARIOS BY VULNERABILITY TYPE
+═══════════════════════════════════════════════════════════
+
+{self._get_attack_scenario(vuln.type)}
+
+═══════════════════════════════════════════════════════════
+DELIVERABLE
+═══════════════════════════════════════════════════════════
+
+Generate PRODUCTION-READY Python code with:
+- Professional structure (80+ lines minimum)
+- Industry-standard practices
+- Real exploit techniques used by security professionals
+- Detailed comments explaining the WHY, not just WHAT
+- Concrete values (replace all template variables with realistic data)
+- Immediately executable without modifications
+
+Return ONLY the Python code. NO explanations outside the code."""
 
                 try:
                     response = self.client.chat.completions.create(
@@ -330,15 +395,24 @@ Return ONLY the Python code, no explanation needed."""
                         messages=[
                             {
                                 "role": "system",
-                                "content": "You are a security expert creating PoC code for defensive penetration testing. Generate safe, educational PoC code."
+                                "content": """You are an elite penetration tester and security researcher with 15+ years of experience. 
+You specialize in creating production-quality PoC exploits that are used in real-world penetration tests for Fortune 500 companies.
+Your PoCs are known for being:
+- Technically sophisticated and comprehensive
+- Well-documented with professional comments
+- Immediately usable by security teams
+- Following OWASP and PTES methodology
+- Production-ready with proper error handling
+
+Generate exploit code that demonstrates deep understanding of the vulnerability mechanics and modern exploitation techniques."""
                             },
                             {
                                 "role": "user",
                                 "content": prompt
                             }
                         ],
-                        temperature=0.2,
-                        max_tokens=1500
+                        temperature=0.3,
+                        max_tokens=3000
                     )
 
                     poc_code = response.choices[0].message.content.strip()
@@ -401,13 +475,90 @@ else:
     print(f'Error: {{response.text}}')
 """
 
+    def _get_attack_scenario(self, vuln_type: str) -> str:
+        """Get specific attack scenarios based on vulnerability type."""
+        scenarios = {
+            'SQL Injection': """
+For SQL Injection:
+- Test multiple injection points (URL params, POST data, headers, cookies)
+- Use time-based blind techniques (BENCHMARK, SLEEP, WAITFOR)
+- Implement error-based extraction (CAST, CONVERT errors)
+- Try UNION-based data exfiltration
+- Include database fingerprinting (MySQL, PostgreSQL, MSSQL, Oracle)
+- Test WAF bypasses (encoding, comments, case variations)
+- Extract sensitive data (users, passwords, credit cards)
+- Demonstrate impact (data theft, authentication bypass, privilege escalation)""",
+            
+            'XSS': """
+For Cross-Site Scripting:
+- Test reflection points (URL, forms, headers)
+- Try encoding bypasses (HTML entities, Unicode, URL encoding)
+- Test filter evasion (event handlers, data URIs, javascript: protocol)
+- Demonstrate cookie theft (document.cookie exfiltration)
+- Show keylogger injection
+- Create phishing overlay proof
+- Test DOM-based XSS with sources and sinks
+- Include Content Security Policy (CSP) bypass techniques""",
+            
+            'Authentication': """
+For Authentication Issues:
+- Test session fixation attacks
+- Try credential stuffing with common passwords
+- Demonstrate privilege escalation (user → admin)
+- Test token predictability
+- Show session hijacking vulnerability
+- Try authentication bypass techniques (SQL injection in login)
+- Test password reset vulnerabilities
+- Demonstrate brute force feasibility""",
+            
+            'CORS': """
+For CORS Misconfiguration:
+- Create malicious HTML page that steals data
+- Test credential-enabled requests
+- Demonstrate cross-origin data theft
+- Try subdomain takeover scenarios
+- Show impact with actual data exfiltration
+- Test pre-flight request manipulation
+- Include victim browser simulation""",
+            
+            'IDOR': """
+For Insecure Direct Object Reference:
+- Enumerate object IDs systematically
+- Test both sequential and UUID-based IDs
+- Demonstrate horizontal privilege escalation (user A → user B)
+- Show vertical privilege escalation (user → admin)
+- Try mass data extraction with automation
+- Test for rate limiting
+- Include data exposure impact assessment""",
+            
+            'Rate Limiting': """
+For Missing Rate Limiting:
+- Demonstrate brute force attack speed
+- Show resource exhaustion (CPU, memory, bandwidth)
+- Test DDoS feasibility with concurrent requests
+- Calculate credentials testable per hour
+- Show business logic abuse (mass registration, voting manipulation)
+- Test API endpoint abuse scenarios"""
+        }
+        
+        for key, scenario in scenarios.items():
+            if key.lower() in vuln_type.lower():
+                return scenario
+        
+        return """
+For this vulnerability:
+- Identify all attack vectors
+- Create multiple exploit variants
+- Demonstrate real-world impact
+- Show data exfiltration or compromise
+- Test security control bypasses
+- Include automated exploitation approach"""
+
     def _clean_template_variables(self, code: str) -> str:
         """
         Clean template variables from generated PoC code.
         Replaces ${variable}, :variable patterns with example values.
         """
-        import re
-
         # Replace JavaScript template literals: ${variable} -> 123
         # Common patterns
         replacements = {

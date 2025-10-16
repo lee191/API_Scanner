@@ -11,8 +11,7 @@ playwright>=1.40.0
 esprima>=4.0.1
 lxml>=4.9.0
 
-# AI Analysis (Optional)
-openai>=1.0.0
+# Configuration
 python-dotenv>=1.0.0
 
 # Security Analysis

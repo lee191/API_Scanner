@@ -1,0 +1,62 @@
+================================================================================
+엔드포인트 탐지 정확도 측정 결과
+================================================================================
+Ground Truth: endpoints_3files.txt
+탐지 결과: scan_result.txt
+================================================================================
+
+## 정확도 메트릭
+
+Precision (정밀도):  100.00%
+  - 탐지한 것 중 실제로 맞는 것의 비율
+  - 20 / 20
+
+Recall (재현율):     95.24%
+  - 실제 엔드포인트 중 탐지한 것의 비율
+  - 20 / 21
+
+F1 Score:            97.56%
+  - Precision과 Recall의 조화평균
+
+## 혼동 행렬 (Confusion Matrix)
+
+True Positives (TP):   20개  - 정확히 탐지
+False Positives (FP):  0개  - 잘못 탐지
+False Negatives (FN):  1개  - 놓친 엔드포인트
+
+================================================================================
+## [OK] True Positives (20개) - 정확히 탐지한 엔드포인트
+================================================================================
+  [+] /api/:api_version/posts?search=:encodeuricomponent(query)
+  [+] /api/:api_version/search?q=:query&table=/:table
+  [+] /api/:api_version/upload
+  [+] /api/:api_version/users/:id
+  [+] /api/internal/admin/users
+  [+] /api/internal/backup/database
+  [+] /api/internal/debug/config
+  [+] /api/internal/exec
+  [+] /comments
+  [+] /login
+  [+] /payments
+  [+] /posts
+  [+] /posts/:id
+  [+] /posts/:id/comments
+  [+] /register
+  [+] /reset-password
+  [+] /users
+  [+] /users/:id
+  [+] http:/localhost:5000/api/v1
+  [+] http:/localhost:5000/api/v1/auth
+
+================================================================================
+## [!] False Negatives (1개) - 놓친 엔드포인트
+================================================================================
+  (실제로 존재하는데 탐지하지 못한 것)
+
+  [!] /posts?search=:encodeuricomponent(query)
+
+================================================================================
+## 종합 평가
+================================================================================
+종합 점수: 우수 (Excellent)
+F1 Score: 97.56%

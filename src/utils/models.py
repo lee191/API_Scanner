@@ -42,6 +42,7 @@ class APIEndpoint(BaseModel):
     body_example: Optional[str] = None
     response_example: Optional[str] = None
     poc_code: Optional[str] = None  # Proof of Concept code to test the endpoint
+    curl_command: Optional[str] = None  # cURL command for endpoint validation
     status_code: Optional[int] = None
     source: str = "unknown"  # 'proxy', 'js_analysis'
     timestamp: datetime = Field(default_factory=get_kst_now)

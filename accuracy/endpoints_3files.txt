@@ -1,0 +1,127 @@
+================================================================================
+특정 JavaScript 파일에서 추출된 API 엔드포인트
+================================================================================
+분석 파일 개수: 3개
+
+  - auth.js: 4개
+  - main.js: 8개
+  - shop.js: 11개
+
+총 엔드포인트: 23개
+================================================================================
+
+
+================================================================================
+파일: auth.js
+경로: test-app/static/auth.js
+엔드포인트 개수: 4개
+================================================================================
+
+[POST] (4개)
+--------------------------------------------------------------------------------
+  /login
+  /register
+  /reset-password
+  http:/localhost:5000/api/v1/auth
+    Parameters: 5000
+
+
+================================================================================
+파일: main.js
+경로: test-app/static/main.js
+엔드포인트 개수: 8개
+================================================================================
+
+[GET] (4개)
+--------------------------------------------------------------------------------
+  /api/:API_VERSION/posts?search=:encodeURIComponent(query)
+    Parameters: search, API_VERSION, encodeURIComponent
+  /api/:API_VERSION/search?q=:query&table=/:table
+    Parameters: q, table, API_VERSION, query
+  /api/:API_VERSION/users/:id
+    Parameters: API_VERSION, id
+  /api/internal/admin/users
+
+[POST] (4개)
+--------------------------------------------------------------------------------
+  /api/:API_VERSION/upload
+    Parameters: API_VERSION
+  /api/internal/backup/database
+  /api/internal/debug/config
+  /api/internal/exec
+
+
+================================================================================
+파일: shop.js
+경로: test-app/static/shop.js
+엔드포인트 개수: 11개
+================================================================================
+
+[GET] (4개)
+--------------------------------------------------------------------------------
+  /posts
+  /posts?search=:encodeURIComponent(query)
+    Parameters: search, encodeURIComponent
+  /users
+  http:/localhost:5000/api/v1
+    Parameters: 5000
+
+[POST] (5개)
+--------------------------------------------------------------------------------
+  /comments
+  /payments
+  /posts
+  /posts/:id
+    Parameters: id
+  /posts/:id/comments
+    Parameters: id
+
+[PUT] (1개)
+--------------------------------------------------------------------------------
+  /users/:id
+    Parameters: id
+
+[DELETE] (1개)
+--------------------------------------------------------------------------------
+  /users/:id
+    Parameters: id
+
+
+================================================================================
+전체 엔드포인트 목록 (간단)
+================================================================================
+
+[GET] (8개)
+--------------------------------------------------------------------------------
+GET      /api/:API_VERSION/posts?search=:encodeURIComponent(query)
+GET      /api/:API_VERSION/search?q=:query&table=/:table
+GET      /api/:API_VERSION/users/:id
+GET      /api/internal/admin/users
+GET      /posts
+GET      /posts?search=:encodeURIComponent(query)
+GET      /users
+GET      http:/localhost:5000/api/v1
+
+[POST] (13개)
+--------------------------------------------------------------------------------
+POST     /api/:API_VERSION/upload
+POST     /api/internal/backup/database
+POST     /api/internal/debug/config
+POST     /api/internal/exec
+POST     /comments
+POST     /login
+POST     /payments
+POST     /posts
+POST     /posts/:id
+POST     /posts/:id/comments
+POST     /register
+POST     /reset-password
+POST     http:/localhost:5000/api/v1/auth
+
+[PUT] (1개)
+--------------------------------------------------------------------------------
+PUT      /users/:id
+
+[DELETE] (1개)
+--------------------------------------------------------------------------------
+DELETE   /users/:id

@@ -1,0 +1,185 @@
+================================================================================
+JavaScript 파일에서 추출된 모든 API 엔드포인트
+================================================================================
+분석 경로: test-app/static
+총 JS 파일: 13개
+총 엔드포인트: 39개
+================================================================================
+
+[GET] (15개)
+--------------------------------------------------------------------------------
+  /api/:API_VERSION/posts?search=:encodeURIComponent(query)
+    Parameters: search, API_VERSION, encodeURIComponent
+    Source: test-app/static\main.js
+
+  /api/internal/admin
+    Source: test-app/static\admin-dashboard.js
+
+  /api/internal/debug/config
+    Source: test-app/static\app.js
+
+  /api/internal/debug/env
+    Source: test-app/static\debug-console.js
+
+  /api/internal/debug/memory
+    Source: test-app/static\debug-console.js
+
+  /api/internal/debug/stack
+    Source: test-app/static\debug-console.js
+
+  /api/internal/discover
+    Source: test-app/static\api-explorer.js
+
+  /api/internal/employees
+    Source: test-app/static\internal-api.js
+
+  /api/internal/endpoints
+    Source: test-app/static\api-explorer.js
+
+  /api/internal/export/:type
+    Parameters: type
+    Source: test-app/static\internal-api.js
+
+  /api/internal/projects
+    Source: test-app/static\internal-api.js
+
+  /api/internal/stats
+    Source: test-app/static\internal-api.js
+
+  /api/v1/search?q=:query
+    Parameters: q, query
+    Source: test-app/static\app.js
+
+  /api/v1/secure/data
+    Source: test-app/static\app.js
+
+  http:/localhost:5000/api/v1
+    Parameters: 5000
+    Source: test-app/static\shop.js
+
+[POST] (22개)
+--------------------------------------------------------------------------------
+  /api/:API_VERSION/search?q=:query&table=/:table
+    Parameters: q, table, API_VERSION, query
+    Source: test-app/static\main.js
+
+  /api/:API_VERSION/upload
+    Parameters: API_VERSION
+    Source: test-app/static\main.js
+
+  /api/:API_VERSION/users/:id
+    Parameters: API_VERSION, id
+    Source: test-app/static\main.js
+
+  /api/internal
+    Source: test-app/static\api-client.js
+
+  /api/internal/admin/config
+    Source: test-app/static\admin.js
+
+  /api/internal/admin/delete
+    Source: test-app/static\admin.js
+
+  /api/internal/admin/users
+    Source: test-app/static\admin.js
+
+  /api/internal/backup/create
+    Source: test-app/static\backup-manager.js
+
+  /api/internal/backup/list
+    Source: test-app/static\backup-manager.js
+
+  /api/internal/backup/restore/
+    Source: test-app/static\backup-manager.js
+
+  /api/internal/cache/clear
+    Source: test-app/static\internal-utils.js
+
+  /api/internal/db/query
+    Source: test-app/static\internal-utils.js
+
+  /api/internal/debug/log
+    Source: test-app/static\debug-logger.js
+
+  /api/internal/jobs/run
+    Source: test-app/static\internal-utils.js
+
+  /api/v1/:resourceType/:resourceId
+    Parameters: resourceType, resourceId
+    Source: test-app/static\app.js
+
+  /api/v1/auth/login?username=:username&password=/:password
+    Parameters: username, password
+    Source: test-app/static\app.js
+
+  /api/v1/products
+    Source: test-app/static\app.js
+
+  /api/v1/upload
+    Source: test-app/static\app.js
+
+  /api/v1/user/:id
+    Parameters: id
+    Source: test-app/static\app.js
+
+  /api/v1/user/delete
+    Source: test-app/static\app.js
+
+  /api/v1/users
+    Source: test-app/static\app.js
+
+  http:/localhost:5000/api/v1/auth
+    Parameters: 5000
+    Source: test-app/static\auth.js
+
+[DELETE] (2개)
+--------------------------------------------------------------------------------
+  /api/internal/backup/database
+    Source: test-app/static\main.js
+
+  /api/internal/exec
+    Source: test-app/static\main.js
+
+
+================================================================================
+전체 엔드포인트 목록 (URL만)
+================================================================================
+DELETE   /api/internal/backup/database
+DELETE   /api/internal/exec
+GET      /api/:API_VERSION/posts?search=:encodeURIComponent(query)
+GET      /api/internal/admin
+GET      /api/internal/debug/config
+GET      /api/internal/debug/env
+GET      /api/internal/debug/memory
+GET      /api/internal/debug/stack
+GET      /api/internal/discover
+GET      /api/internal/employees
+GET      /api/internal/endpoints
+GET      /api/internal/export/:type
+GET      /api/internal/projects
+GET      /api/internal/stats
+GET      /api/v1/search?q=:query
+GET      /api/v1/secure/data
+GET      http:/localhost:5000/api/v1
+POST     /api/:API_VERSION/search?q=:query&table=/:table
+POST     /api/:API_VERSION/upload
+POST     /api/:API_VERSION/users/:id
+POST     /api/internal
+POST     /api/internal/admin/config
+POST     /api/internal/admin/delete
+POST     /api/internal/admin/users
+POST     /api/internal/backup/create
+POST     /api/internal/backup/list
+POST     /api/internal/backup/restore/
+POST     /api/internal/cache/clear
+POST     /api/internal/db/query
+POST     /api/internal/debug/log
+POST     /api/internal/jobs/run
+POST     /api/v1/:resourceType/:resourceId
+POST     /api/v1/auth/login?username=:username&password=/:password
+POST     /api/v1/products
+POST     /api/v1/upload
+POST     /api/v1/user/:id
+POST     /api/v1/user/delete
+POST     /api/v1/users
+POST     http:/localhost:5000/api/v1/auth

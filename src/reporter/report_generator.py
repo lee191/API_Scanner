@@ -6,7 +6,13 @@ from datetime import datetime
 from typing import Dict, List
 from jinja2 import Template
 from src.utils.models import ScanResult, VulnerabilityLevel
-from src.scanner.vulnerability_scanner import VulnerabilityScanner
+from src.utils.curl_generator import CurlGenerator
+from src.utils.api_classifier import APIClassifier
+
+
+def is_shadow_api(endpoint) -> bool:
+    """Determine if an endpoint is a shadow API using intelligent classifier."""
+    return APIClassifier.classify(endpoint, source=endpoint.source)
 
 
 class ReportGenerator:
@@ -45,7 +51,7 @@ class ReportGenerator:
                 'parameters': ep.parameters,
                 'source': ep.source,
                 'status_code': ep.status_code,
-                'is_shadow_api': VulnerabilityScanner.is_shadow_api(ep)
+                'is_shadow_api': is_shadow_api(ep)
             }
 
             if ep_data['is_shadow_api']:
@@ -65,7 +71,7 @@ class ReportGenerator:
                 'evidence': vuln.evidence,
                 'recommendation': vuln.recommendation,
                 'cwe_id': vuln.cwe_id,
-                'poc': VulnerabilityScanner.generate_poc(vuln)
+                'poc': ''  # PoC generation removed
             }
             vulnerabilities_with_poc.append(vuln_data)
 
@@ -88,7 +94,7 @@ class ReportGenerator:
                     'parameters': ep.parameters,
                     'source': ep.source,
                     'status_code': ep.status_code,
-                    'is_shadow_api': VulnerabilityScanner.is_shadow_api(ep)
+                    'is_shadow_api': is_shadow_api(ep)
                 }
                 for ep in scan_result.endpoints
             ],
@@ -250,7 +256,7 @@ class ReportGenerator:
         endpoints_with_classification = []
 
         for ep in scan_result.endpoints:
-            is_shadow = VulnerabilityScanner.is_shadow_api(ep)
+            is_shadow = is_shadow_api(ep)
             ep_data = {
                 'url': ep.url,
                 'method': ep.method,
@@ -278,7 +284,7 @@ class ReportGenerator:
                 'evidence': vuln.evidence,
                 'recommendation': vuln.recommendation,
                 'cwe_id': vuln.cwe_id,
-                'poc': VulnerabilityScanner.generate_poc(vuln)
+                'poc': ''  # PoC generation removed
             }
             vulnerabilities_with_poc.append(vuln_data)
 
@@ -291,7 +297,7 @@ class ReportGenerator:
             endpoint_groups[group] = [{
                 'method': ep.method,
                 'url': ep.url,
-                'is_shadow_api': VulnerabilityScanner.is_shadow_api(ep)
+                'is_shadow_api': is_shadow_api(ep)
             } for ep in eps]
 
         # 통계에 Shadow API 정보 추가
@@ -515,7 +521,7 @@ class ReportGenerator:
         public_endpoints = []
 
         for ep in scan_result.endpoints:
-            is_shadow = VulnerabilityScanner.is_shadow_api(ep)
+            is_shadow = is_shadow_api(ep)
             ep_data = {
                 'url': ep.url,
                 'method': ep.method,
@@ -542,7 +548,7 @@ class ReportGenerator:
                 'evidence': vuln.evidence,
                 'recommendation': vuln.recommendation,
                 'cwe_id': vuln.cwe_id,
-                'poc': VulnerabilityScanner.generate_poc(vuln)
+                'poc': ''  # PoC generation removed
             }
             vulnerabilities_with_poc.append(vuln_data)
 

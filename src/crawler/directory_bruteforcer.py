@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import List, Set, Dict, Any
 from urllib.parse import urljoin, urlparse
 import urllib3
+from bs4 import BeautifulSoup
+import re
 
 # Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -38,6 +40,7 @@ class DirectoryBruteForcer:
         self.timeout = timeout
         self.discovered_paths: List[Dict[str, Any]] = []
         self.discovered_urls: Set[str] = set()  # URL 중복 체크용
+        self.discovered_js_files: Set[str] = set()  # 발견된 JS 파일 (중복 제거)
 
         # 기본 wordlist 경로 설정
         if wordlist_path is None:
@@ -163,6 +166,97 @@ class DirectoryBruteForcer:
             발견된 경로 정보 리스트
         """
         return self.discovered_paths
+
+    def collect_js_from_page(self, url: str) -> Set[str]:
+        """
+        특정 페이지에서 JavaScript 파일을 추출합니다.
+
+        Args:
+            url: 분석할 페이지 URL
+
+        Returns:
+            발견된 JS 파일 URL 세트
+        """
+        js_files = set()
+
+        try:
+            response = self.session.get(
+                url,
+                timeout=self.timeout,
+                verify=False
+            )
+
+            if response.status_code != 200:
+                return js_files
+
+            # HTML 파싱
+            soup = BeautifulSoup(response.content, 'html.parser')
+
+            # <script src="..."> 태그에서 추출
+            for script in soup.find_all('script', src=True):
+                src = script.get('src')
+                if src:
+                    # 상대 경로를 절대 경로로 변환
+                    js_url = urljoin(url, src)
+
+                    # .js 파일만 수집
+                    if js_url.endswith('.js') or '.js?' in js_url:
+                        js_files.add(js_url)
+
+            # 인라인 스크립트에서 동적 로드 패턴 찾기
+            for script in soup.find_all('script'):
+                if script.string:
+                    # import(...), require(...) 등의 패턴
+                    imports = re.findall(r'(?:import|require)\s*\(\s*[\'"]([^\'"]+\.js)[\'"]', script.string)
+                    for imp in imports:
+                        js_url = urljoin(url, imp)
+                        js_files.add(js_url)
+
+        except Exception as e:
+            print(f"[!] JS 수집 실패 ({url}): {e}")
+
+        return js_files
+
+    def crawl_discovered_paths(self) -> List[str]:
+        """
+        발견된 경로에 접근하여 추가 JS 파일을 수집합니다.
+
+        Returns:
+            새로 발견된 JS 파일 경로 리스트
+        """
+        print(f"\n[*] 발견된 경로에서 JS 파일 수집 중...")
+
+        newly_discovered = []
+
+        for path_info in self.discovered_paths:
+            url = path_info['path']
+            status_code = path_info['status_code']
+            content_type = path_info.get('content_type', '')
+
+            # HTML 페이지만 크롤링 (200 OK)
+            if status_code == 200 and 'text/html' in content_type.lower():
+                print(f"[*] 크롤링: {url}")
+
+                js_files = self.collect_js_from_page(url)
+
+                for js_url in js_files:
+                    # 중복 체크
+                    if js_url not in self.discovered_js_files:
+                        self.discovered_js_files.add(js_url)
+                        newly_discovered.append(js_url)
+                        print(f"  [+] 새 JS 파일 발견: {js_url}")
+
+        print(f"[+] 크롤링 완료: {len(newly_discovered)}개 새 JS 파일 발견")
+        return newly_discovered
+
+    def get_discovered_js_files(self) -> List[str]:
+        """
+        발견된 모든 JS 파일 URL을 반환합니다.
+
+        Returns:
+            JS 파일 URL 리스트
+        """
+        return list(self.discovered_js_files)
 
 
 def main():

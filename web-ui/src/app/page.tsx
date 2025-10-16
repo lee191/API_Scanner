@@ -38,8 +38,6 @@ export default function ImprovedHome() {
   // 기본 상태
   const [targetUrl, setTargetUrl] = useState('');
   const [jsPath, setJsPath] = useState('');
-  const [scanVulns, setScanVulns] = useState(true);
-  const [aiEnabled, setAiEnabled] = useState(true);
   const [bruteforceEnabled, setBruteforceEnabled] = useState(false);
   const [analysisType, setAnalysisType] = useState<'js_only' | 'full_scan'>('full_scan');
   const [scanning, setScanning] = useState(false);
@@ -434,8 +432,8 @@ export default function ImprovedHome() {
         target_url: targetUrl,
         js_path: jsPath || undefined,
         project_id: selectedProject,
-        scan_vulns: scanVulns,
-        ai_enabled: aiEnabled,
+        scan_vulns: false,
+        ai_enabled: false,
         bruteforce_enabled: bruteforceEnabled,
         analysis_type: analysisType
       });
@@ -928,35 +926,6 @@ export default function ImprovedHome() {
                       {analysisType === 'full_scan' && (
                         <div className="space-y-3 bg-blue-500/10 rounded-lg p-4 border border-blue-500/30">
                           <div className="text-sm font-semibold text-blue-300 mb-3">스캔 옵션</div>
-                          
-                          <label className="flex items-center gap-3 p-3 bg-white/10 rounded-lg hover:bg-white/20 transition cursor-pointer">
-                            <input
-                              type="checkbox"
-                              id="scanVulns"
-                              checked={scanVulns}
-                              onChange={(e) => setScanVulns(e.target.checked)}
-                              className="w-5 h-5 rounded accent-blue-500"
-                            />
-                            <div className="flex-1">
-                              <div className="text-white font-semibold">취약점 스캔</div>
-                              <div className="text-xs text-gray-400">보안 취약점을 자동으로 탐지합니다</div>
-                            </div>
-                            <Shield className="w-5 h-5 text-orange-400" />
-                          </label>
-
-                          <label className="flex items-center gap-3 p-3 bg-white/10 rounded-lg hover:bg-white/20 transition cursor-pointer">
-                            <input
-                              type="checkbox"
-                              id="aiEnabled"
-                              checked={aiEnabled}
-                              onChange={(e) => setAiEnabled(e.target.checked)}
-                              className="w-5 h-5 rounded accent-purple-500"
-                            />
-                            <div className="flex-1">
-                              <div className="text-white font-semibold">🤖 AI 분석</div>
-                              <div className="text-xs text-gray-400">PoC 코드를 자동으로 생성합니다</div>
-                            </div>
-                          </label>
 
                           <label className="flex items-center gap-3 p-3 bg-white/10 rounded-lg hover:bg-white/20 transition cursor-pointer">
                             <input

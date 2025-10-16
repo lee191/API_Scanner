@@ -7,6 +7,8 @@ from sqlalchemy import desc
 from uuid import uuid4
 
 from src.database.models import Project, Scan, Endpoint, Vulnerability, DiscoveredPath, ScanStatus, VulnerabilitySeverity
+from src.utils.curl_generator import CurlGenerator
+from src.utils.api_classifier import APIClassifier
 
 # Korea Standard Time (UTC+9)
 KST = timezone(timedelta(hours=9))
@@ -15,7 +17,6 @@ def get_kst_now():
     """Get current time in KST."""
     return datetime.now(KST)
 from src.utils.models import ScanResult, APIEndpoint, Vulnerability as VulnModel
-from src.scanner.vulnerability_scanner import VulnerabilityScanner
 
 
 class ProjectRepository:
@@ -207,16 +208,27 @@ class ScanRepository:
 
         # Save endpoints
         for ep in scan_result.endpoints:
+            # Classify endpoint using intelligent classifier
+            is_shadow = APIClassifier.classify(ep, source=ep.source)
+
+            # Generate curl command for validation
+            try:
+                curl_command = CurlGenerator.generate(ep)
+            except Exception as e:
+                print(f"[!] Failed to generate curl for {ep.url}: {e}")
+                curl_command = None
+
             endpoint = Endpoint(
                 scan_id=scan.id,
                 url=ep.url,
                 method=ep.method.value if hasattr(ep.method, 'value') else str(ep.method),
-                is_shadow_api=VulnerabilityScanner.is_shadow_api(ep),
+                is_shadow_api=is_shadow,
                 parameters=ep.parameters,
                 headers=ep.headers,
                 body_example=ep.body_example,
                 response_example=ep.response_example,
                 poc_code=ep.poc_code,
+                curl_command=curl_command,
                 status_code=ep.status_code,
                 source=ep.source
             )

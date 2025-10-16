@@ -1,0 +1,190 @@
+# 스캔 결과 vs 실제 엔드포인트 비교 분석
+# Generated: 2025-10-16 11:13
+# Scan ID: d5a35972-01f1-4b3e-aea6-2b0a8391b6b2
+
+================================================================================
+요약
+================================================================================
+
+스캔 결과:
+  - 발견된 엔드포인트: 59개
+  - 스캔 시간: ~0.06초
+  - 분석된 JavaScript 파일: 13개
+
+실제 구현 상태 (app.py 기준):
+  - 실제 구현된 엔드포인트: 17개
+  - JavaScript에만 정의된 엔드포인트: 많음 (구현 안 됨)
+
+================================================================================
+✅ 정확히 발견된 엔드포인트 (True Positives)
+================================================================================
+
+1. Shadow APIs - 정확히 발견:
+   ✅ GET  /api/internal/admin/users       (admin.js에서 발견)
+   ✅ POST /api/internal/admin/delete      (admin.js에서 발견)
+   ✅ PUT  /api/internal/admin/config      (admin.js에서 발견)
+   ✅ GET  /api/internal/debug/config      (app.js, main.js에서 발견)
+   ✅ GET  /api/internal/stats             (internal-api.js에서 발견)
+
+2. Public APIs - 정확히 발견:
+   ✅ GET  /api/v1/users                   (app.js에서 발견)
+   ✅ GET  /api/v1/user/:id                (app.js에서 발견)
+   ✅ GET  /api/v1/products                (app.js에서 발견)
+   ✅ GET  /api/v1/search                  (app.js에서 발견)
+   ✅ POST /api/v1/upload                  (app.js에서 발견)
+   ✅ POST /api/v1/user/delete             (app.js에서 발견)
+   ✅ GET  /api/v1/secure/data             (app.js에서 발견)
+
+탐지율: 12/17 = 70.6%
+
+================================================================================
+❌ 놓친 엔드포인트 (False Negatives)
+================================================================================
+
+실제로 구현되어 있지만 스캔에서 발견하지 못한 엔드포인트:
+
+1. HTML에서 직접 구현 (JavaScript 없음):
+   ❌ GET  /                               (메인 페이지)
+   ❌ GET  /admin                          (관리자 페이지)
+   ❌ GET  /internal                       (내부 페이지)
+   ❌ GET  /debug                          (디버그 페이지)
+   ❌ GET  /backup                         (백업 페이지)
+   ❌ GET  /api                            (API 문서)
+
+   이유: JavaScript 분석만 수행, 브루트포싱 미실행
+
+2. POST 엔드포인트 (app.py에서 구현):
+   ❌ POST /api/v1/auth/login              (shop.js에는 다른 경로로 정의)
+   ❌ POST /api/internal/execute           (JavaScript에 없음)
+
+놓친 비율: 5/17 = 29.4%
+
+================================================================================
+⚠️  잘못 탐지된 엔드포인트 (False Positives)
+================================================================================
+
+JavaScript에는 정의되어 있지만 실제로 구현되지 않은 엔드포인트:
+
+1. shop.js의 엔드포인트 (실제 구현 안 됨):
+   ⚠️  GET  /posts
+   ⚠️  GET  /posts/:id
+   ⚠️  POST /posts
+   ⚠️  POST /posts/:id/comments
+   ⚠️  POST /comments
+   ⚠️  GET  /users                          (실제는 /api/v1/users)
+   ⚠️  PUT  /users/:id
+   ⚠️  DELETE /users/:id
+   ⚠️  POST /payments
+   ⚠️  GET  /api/v1/posts                   (실제 구현 안 됨)
+   ⚠️  POST /api/v1/posts
+   ⚠️  POST /api/v1/comments
+   ⚠️  GET  /api/v1/payments
+
+2. auth.js의 엔드포인트 (실제 구현 안 됨):
+   ⚠️  POST /login                          (실제는 /api/v1/auth/login)
+   ⚠️  POST /register                       (실제는 /api/v1/auth/register)
+   ⚠️  POST /reset-password                 (실제는 /api/v1/auth/reset-password)
+   ⚠️  POST /api/v1/auth/register           (app.py에 없음)
+   ⚠️  POST /api/v1/auth/reset-password     (app.py에 없음)
+
+3. 기타 JavaScript 파일의 엔드포인트 (실제 구현 안 됨):
+   ⚠️  GET  /stats                          (admin-dashboard.js)
+   ⚠️  GET  /sessions                       (admin-dashboard.js)
+   ⚠️  GET  /logs                           (admin-dashboard.js)
+   ⚠️  GET  /api/internal/admin             (admin-dashboard.js)
+   ⚠️  POST /api/internal                   (api-client.js)
+   ⚠️  GET  /api/internal/discover          (api-explorer.js)
+   ⚠️  GET  /api/internal/endpoints         (api-explorer.js)
+   ⚠️  POST /api/internal/backup/*          (backup-manager.js - 4개)
+   ⚠️  GET  /api/internal/debug/env         (debug-console.js)
+   ⚠️  GET  /api/internal/debug/memory      (debug-console.js)
+   ⚠️  GET  /api/internal/debug/stack       (debug-console.js)
+   ⚠️  POST /api/internal/debug/log         (debug-logger.js)
+   ⚠️  GET  /api/internal/employees         (internal-api.js)
+   ⚠️  GET  /api/internal/projects          (internal-api.js)
+   ⚠️  GET  /api/internal/export/:type      (internal-api.js)
+   ⚠️  POST /api/internal/cache/clear       (internal-utils.js)
+   ⚠️  POST /api/internal/jobs/run          (internal-utils.js)
+   ⚠️  POST /api/internal/db/query          (internal-utils.js)
+   ⚠️  POST /api/internal/backup/database   (main.js)
+   ⚠️  POST /api/internal/exec              (main.js)
+
+False Positive 비율: 47/59 = 79.7%
+
+================================================================================
+🔍 상세 분석
+================================================================================
+
+1. API 경로 불일치:
+   - shop.js: SHOP_API = 'http://localhost:5000/api/v1' 사용
+   - 실제 호출: ${SHOP_API}/posts → /api/v1/posts
+   - 하지만 app.py에는 이 엔드포인트가 없음
+   - 스캐너는 JavaScript 코드를 정확히 분석했지만, 실제 서버 구현과 불일치
+
+2. auth.js의 경로 문제:
+   - AUTH_API = 'http://localhost:5000/api/v1/auth' 정의
+   - 실제 호출: ${AUTH_API}/login → /api/v1/auth/login
+   - 하지만 app.py에는 /api/v1/auth/login (POST with query params)
+   - 스캐너가 base URL 제거 로직에서 /login으로 인식
+
+3. URL 파싱 이슈:
+   ❌ "http:/localhost:5000/api/v1/auth"  (슬래시 누락)
+   ❌ "http:/localhost:5000/api/v1"       (슬래시 누락)
+
+================================================================================
+📊 정확도 메트릭
+================================================================================
+
+True Positives (실제로 구현되고 정확히 탐지): 12개
+False Positives (구현 안 됨, 잘못 탐지): 47개
+False Negatives (구현됨, 놓침): 5개
+True Negatives: N/A
+
+Precision (정밀도) = TP / (TP + FP) = 12 / 59 = 20.3%
+Recall (재현율) = TP / (TP + FN) = 12 / 17 = 70.6%
+F1 Score = 2 * (Precision * Recall) / (Precision + Recall) = 31.6%
+
+================================================================================
+💡 개선 권장사항
+================================================================================
+
+1. False Positive 감소:
+   [ ] 발견된 엔드포인트를 실제로 HTTP 요청하여 검증
+   [ ] 404 응답을 받으면 false positive로 표시
+   [ ] 200/201/400/401/403 등의 응답은 실제 구현된 것으로 간주
+
+2. False Negative 감소:
+   [ ] 브루트포싱 기능 추가 (/admin, /debug 등 발견)
+   [ ] HTML 페이지의 인라인 JavaScript도 분석
+   [ ] 프록시 모드로 실제 트래픽 캡처
+
+3. URL 파싱 개선:
+   [ ] "http:/localhost" 같은 잘못된 형식 수정
+   [ ] Base URL 제거 로직 개선
+   [ ] Template variable 처리 개선 (API_VERSION 등)
+
+4. 검증 추가:
+   [ ] 각 엔드포인트에 curl 명령어 생성 완료
+   [ ] 자동으로 curl 실행하여 응답 확인
+   [ ] 응답 코드와 body를 리포트에 포함
+
+================================================================================
+🎯 결론
+================================================================================
+
+장점:
+  ✅ JavaScript 파일에서 엔드포인트 추출 성공
+  ✅ Shadow API 5개 중 5개 모두 발견 (100%)
+  ✅ Public API 대부분 발견 (7/12 = 58%)
+  ✅ Path parameter, Query parameter 정확히 추출
+
+단점:
+  ❌ False Positive 비율 높음 (79.7%)
+  ❌ JavaScript에 정의만 되고 구현 안 된 엔드포인트 구별 못 함
+  ❌ 브루트포싱 미실행으로 hidden page 못 찾음
+  ❌ URL 파싱 오류 일부 존재
+
+다음 단계:
+  1. 발견된 엔드포인트를 실제로 HTTP 요청하여 검증
+  2. 브루트포싱으로 /admin, /debug 등 찾기
+  3. False Positive 필터링으로 정밀도 향상

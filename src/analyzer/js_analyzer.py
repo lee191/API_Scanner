@@ -9,40 +9,14 @@ import esprima
 from bs4 import BeautifulSoup
 from src.utils.models import APIEndpoint, HTTPMethod
 
-# Try to import AI analyzer (optional)
-try:
-    from src.analyzer.ai_analyzer import AIJSAnalyzer
-    AI_AVAILABLE = True
-except ImportError:
-    AI_AVAILABLE = False
-    print("[!] AI Analyzer not available. Install openai package: pip install openai")
-
 
 class JSAnalyzer:
     """Analyze JavaScript files to extract API endpoints."""
 
-    def __init__(self, use_ai: bool = True):
-        """
-        Initialize JS analyzer.
-
-        Args:
-            use_ai: Enable AI-powered analysis (default: True)
-        """
+    def __init__(self):
+        """Initialize JS analyzer."""
         self.endpoints: List[APIEndpoint] = []
-        self.seen_urls: Set[str] = set()
-        self.use_ai = use_ai and AI_AVAILABLE
-
-        # Initialize AI analyzer if available
-        if self.use_ai:
-            try:
-                self.ai_analyzer = AIJSAnalyzer()
-                if self.ai_analyzer.enabled:
-                    print("[+] AI-powered JS analysis enabled")
-                else:
-                    self.use_ai = False
-            except Exception as e:
-                print(f"[!] Failed to initialize AI analyzer: {e}")
-                self.use_ai = False
+        self.seen_urls: Set[str] = set()  # Track (method:URL) pairs to prevent exact duplicates
 
         # Enhanced API patterns with more coverage
         self.api_patterns = [
@@ -92,6 +66,18 @@ class JSAnalyzer:
             # Full URLs
             r'[\'"`](https?://[^\'"` ]+/api/[^\'"` ]+)[\'"`]',
             r'[\'"`](https?://[^\'"` ]+/v\d+/[^\'"` ]+)[\'"`]',
+
+            # ===== Dynamic URL construction (NEW) =====
+            # Template literals with variables: `/api/users/${userId}`
+            r'`/api/[^`]*\$\{[^}]+\}[^`]*`',
+            r'`/internal/[^`]*\$\{[^}]+\}[^`]*`',
+            r'`/v\d+/[^`]*\$\{[^}]+\}[^`]*`',
+            # String concatenation: '/api/users/' + userId
+            r'[\'"](/api/[^\'"]+)[\'"][\s\+]+\w+',
+            r'[\'"](/internal/[^\'"]+)[\'"][\s\+]+\w+',
+            # Variable assignment with API paths
+            r'(?:const|let|var)\s+\w+\s*=\s*[\'"`](/api/[^\'"` ]+)[\'"`]',
+            r'(?:const|let|var)\s+\w+\s*=\s*`(/api/[^`]+)`',
         ]
 
     def analyze_file(self, file_path: str, base_url: str = "") -> List[APIEndpoint]:
@@ -102,22 +88,6 @@ class JSAnalyzer:
 
             # Use regex-based analysis
             endpoints = self.analyze_content(content, base_url, source=file_path)
-
-            # Enhance with AI if enabled
-            if self.use_ai and len(content) > 100:  # Only use AI for substantial files
-                try:
-                    print(f"[AI] Analyzing {file_path}...")
-                    ai_endpoints = self.ai_analyzer.analyze_js_code(content, file_path, base_url)
-
-                    # Merge AI results with regex results
-                    for ai_ep in ai_endpoints:
-                        endpoint_id = f"{ai_ep.method}:{ai_ep.url}"
-                        if endpoint_id not in self.seen_urls:
-                            self.seen_urls.add(endpoint_id)
-                            endpoints.append(ai_ep)
-                            print(f"  [AI] Found: {ai_ep.method} {ai_ep.url}")
-                except Exception as e:
-                    print(f"[!] AI analysis error: {e}")
 
             return endpoints
 
@@ -135,29 +105,54 @@ class JSAnalyzer:
             for match in matches:
                 try:
                     # Determine method and URL based on pattern
+                    method = HTTPMethod.GET  # Default
+                    url = None
+
                     if len(match.groups()) == 2:
-                        method_or_url = match.group(1)
-                        url = match.group(2) if len(match.groups()) > 1 else match.group(1)
+                        group1 = match.group(1)
+                        group2 = match.group(2)
 
                         # Check if first group is a method
-                        if method_or_url.upper() in ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']:
-                            method = HTTPMethod(method_or_url.upper())
+                        if group1.upper() in ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']:
+                            method = HTTPMethod(group1.upper())
+                            url = group2
                         else:
-                            url = method_or_url
-                            method = HTTPMethod.GET
+                            # Check if it's a jQuery/framework method
+                            method = self._map_framework_method(group1)
+                            url = group2
                     else:
                         url = match.group(1)
                         method = HTTPMethod.GET
 
                     # Clean and validate URL (handles template variables, normalization, etc.)
-                    url = self._clean_url(url, base_url)
+                    url_result = self._clean_url(url, base_url)
 
-                    # Skip invalid or non-API URLs
-                    if not url or not self._is_api_url(url):
+                    if isinstance(url_result, tuple):
+                        url, had_api_variable = url_result
+                    else:
+                        url, had_api_variable = url_result, False
+
+                    # Skip invalid URLs
+                    if not url:
                         continue
 
-                    # Create unique identifier
-                    endpoint_id = f"{method}:{url}"
+                    # Skip non-API URLs (but allow URLs that came from API base variables)
+                    if not had_api_variable and not self._is_api_url(url):
+                        continue
+
+                    # Try to extract method, headers, and body from surrounding context
+                    context_info = self._extract_context_info(content, url, match.start())
+
+                    # Update method if found in context (context takes priority)
+                    if context_info.get('method'):
+                        try:
+                            method = HTTPMethod(context_info['method'].upper())
+                        except:
+                            pass
+
+                    # Create unique identifier (method + URL)
+                    # This allows same URL with different methods (e.g., GET /posts and POST /posts)
+                    endpoint_id = f"{method.value}:{url}"
                     if endpoint_id in self.seen_urls:
                         continue
 
@@ -165,16 +160,6 @@ class JSAnalyzer:
 
                     # Extract parameters from URL
                     params = self._extract_params_from_url(url)
-
-                    # Try to extract method, headers, and body from surrounding context
-                    context_info = self._extract_context_info(content, url, match.start())
-
-                    # Update method if found in context
-                    if context_info.get('method'):
-                        try:
-                            method = HTTPMethod(context_info['method'].upper())
-                        except:
-                            pass
 
                     endpoint = APIEndpoint(
                         url=url,
@@ -197,6 +182,30 @@ class JSAnalyzer:
             pass
 
         return endpoints
+
+    def _map_framework_method(self, method_name: str) -> HTTPMethod:
+        """
+        Map framework-specific method names to HTTP methods.
+
+        Args:
+            method_name: Method name from framework (e.g., 'get', 'post', 'ajax')
+
+        Returns:
+            Corresponding HTTPMethod
+        """
+        method_map = {
+            'get': HTTPMethod.GET,
+            'post': HTTPMethod.POST,
+            'put': HTTPMethod.PUT,
+            'delete': HTTPMethod.DELETE,
+            'patch': HTTPMethod.PATCH,
+            'head': HTTPMethod.HEAD,
+            'options': HTTPMethod.OPTIONS,
+            'ajax': HTTPMethod.GET,  # $.ajax defaults to GET
+            'getjson': HTTPMethod.GET,
+        }
+
+        return method_map.get(method_name.lower(), HTTPMethod.GET)
 
     def _analyze_with_esprima(self, content: str, base_url: str, source: str) -> List[APIEndpoint]:
         """
@@ -305,9 +314,15 @@ class JSAnalyzer:
                             body = self._extract_string_value(value_node)
 
             # Clean and validate URL
-            url = self._clean_url(url, base_url)
-            if url and self._is_api_url(url):
-                endpoint_id = f"{method}:{url}"
+            url_result = self._clean_url(url, base_url)
+            if isinstance(url_result, tuple):
+                url, had_api_variable = url_result
+            else:
+                url, had_api_variable = url_result, False
+
+            if url and (had_api_variable or self._is_api_url(url)):
+                # Deduplicate by method + URL
+                endpoint_id = f"{method.value}:{url}"
                 if endpoint_id not in self.seen_urls:
                     self.seen_urls.add(endpoint_id)
 
@@ -342,9 +357,15 @@ class JSAnalyzer:
                 method = HTTPMethod.GET
 
             # Clean and validate URL
-            url = self._clean_url(url, base_url)
-            if url and self._is_api_url(url):
-                endpoint_id = f"{method}:{url}"
+            url_result = self._clean_url(url, base_url)
+            if isinstance(url_result, tuple):
+                url, had_api_variable = url_result
+            else:
+                url, had_api_variable = url_result, False
+
+            if url and (had_api_variable or self._is_api_url(url)):
+                # Deduplicate by method + URL
+                endpoint_id = f"{method.value}:{url}"
                 if endpoint_id not in self.seen_urls:
                     self.seen_urls.add(endpoint_id)
 
@@ -429,47 +450,137 @@ class JSAnalyzer:
 
         return result
 
-    def _clean_url(self, url: str, base_url: str) -> str:
-        """Clean and normalize URL."""
+    def _clean_url(self, url: str, base_url: str):
+        """
+        Clean and normalize URL with improved handling.
+
+        Returns:
+            tuple: (cleaned_url, had_api_variable) where had_api_variable indicates if an API base variable was removed
+        """
         if not url:
-            return None
+            return (None, False)
 
         # Strip whitespace
         url = url.strip()
 
         # Reject empty or too short URLs
         if len(url) < 2:
-            return None
+            return (None, False)
 
         # Remove base URL template variables
-        # Common patterns: ${baseUrl}, ${API_BASE}, ${HOST}, etc.
+        # Common patterns: ${baseUrl}, ${API_BASE}, ${HOST}, ${AUTH_API}, ${SHOP_API}, etc.
         base_url_patterns = [
-            r'^\$\{(base[Uu]rl|API_URL|API_BASE|HOST|host|url|URL|BASE_PATH|basePath|apiBase|api_base)\}/?',
-            r'^\$\{[^}]*[Uu]rl[^}]*\}/?',
-            r'^\$\{[^}]*[Hh]ost[^}]*\}/?',
-            r'^\$\{[^}]*[Bb]ase[^}]*\}/?',  # Catch any variable with "base" in name
+            r'^\$\{(base[Uu]rl|API_URL|API_BASE|HOST|host|url|URL|BASE_PATH|basePath|apiBase|api_base|server|SERVER)\}/?',
+            r'^\$\{[^}]*[Uu]rl[^}]*\}/?',  # Any variable with "url" in name
+            r'^\$\{[^}]*[Hh]ost[^}]*\}/?',  # Any variable with "host" in name
+            r'^\$\{[^}]*[Bb]ase[^}]*\}/?',  # Any variable with "base" in name
+            r'^\$\{[^}]*[Ss]erver[^}]*\}/?',  # Any variable with "server" in name
+            r'^\$\{[^}]*_?API[^}]*\}/?',  # Any variable ending with "_API" or containing "API"
+            r'^\$\{API[^}]*\}/?',  # Variables starting with "API"
         ]
 
+        original_url = url
+        had_api_variable = False
+
         for pattern in base_url_patterns:
-            url = re.sub(pattern, '', url)
+            new_url = re.sub(pattern, '', url)
+            if new_url != url:
+                had_api_variable = True
+                url = new_url
+
+        # Remove common API base constants (case insensitive)
+        temp = re.sub(r'^API_BASE/?', '', url, flags=re.IGNORECASE)
+        if temp != url:
+            had_api_variable = True
+            url = temp
+
+        temp = re.sub(r'^BASE_URL/?', '', url, flags=re.IGNORECASE)
+        if temp != url:
+            had_api_variable = True
+            url = temp
 
         # If removing base URL variable left us with empty or just '/', reject
         if not url or url == '/':
-            return None
+            return (None, False)
 
-        # Replace template variables with parameter names
-        url = re.sub(r'\$\{([^}]+)\}', r':\1', url)
-        url = re.sub(r'\{([^}]+)\}', r':\1', url)
+        # If we removed a base URL variable and the remaining path doesn't start with /,
+        # it means the variable contained the full path (like ${AUTH_API}/login)
+        # In this case, ensure the path starts with /
+        if url != original_url and not url.startswith('/') and not url.startswith('http'):
+            url = '/' + url
+
+        # Replace template variables with parameter names (improved)
+        # Handle function calls in template literals: ${encodeURIComponent(search)} → :search
+        def replace_template_function(match):
+            content = match.group(1)
+            # Check if it's a function call like encodeURIComponent(varName)
+            func_match = re.match(r'(encodeURIComponent|decodeURIComponent|encodeURI|decodeURI|parseInt|parseFloat|String|Number)\s*\(\s*([^)]+)\s*\)', content)
+            if func_match:
+                # Extract the variable name from inside the function call
+                var_name = func_match.group(2).strip()
+                return f':{var_name}'
+            # Otherwise just use the content directly
+            return f':{content}'
+
+        # ${userId} → :userId or ${encodeURIComponent(search)} → :search
+        url = re.sub(r'\$\{([^}]+)\}', replace_template_function, url)
+        # {userId} → :userId (but avoid matching port numbers)
+        # Only replace if not preceded by : (to avoid matching :8080)
+        url = re.sub(r'(?<!:)\{([^}]+)\}', r':\1', url)
+
+        # Reject URLs with generic placeholder names (these are usually from utility function definitions)
+        generic_placeholders = ['endpoint', 'path', 'route', 'url', 'uri', 'resource']
+        for placeholder in generic_placeholders:
+            if f':{placeholder}' in url.lower():
+                return (None, False)
+
+        # Normalize parameter names (lowercase for consistency)
+        def normalize_param(match):
+            param_name = match.group(1)
+
+            # Skip if it's a port number (all digits)
+            if param_name.isdigit():
+                return match.group(0)  # Return unchanged (:5000 stays as :5000)
+
+            # Skip common JavaScript function names
+            if param_name in ['encodeURIComponent', 'decodeURIComponent', 'encodeURI', 'decodeURI',
+                             'parseInt', 'parseFloat', 'String', 'Number']:
+                # This shouldn't happen if template replacement worked, but just in case
+                return ''  # Remove it
+
+            # Common ID patterns
+            if re.match(r'(user|post|product|item|order|comment)id', param_name, re.IGNORECASE):
+                return ':id'
+
+            # Keep descriptive names
+            return f':{param_name}'
+
+        url = re.sub(r':(\w+)', normalize_param, url)
+
+        # Clean up any remaining port numbers in URL path (shouldn't happen, but safety check)
+        # Match pattern like ://localhost:5000/ and ensure :5000 is not treated as path param
+        # This is done by checking if :digits appears right after hostname
+        url = re.sub(r'(://[^/]+):(\d+)/', r'\1:\2/', url)  # Keep port numbers intact
 
         # Fix malformed URLs that start with :param
         # /api/:param/users → valid (path param)
         # :param/api/users → INVALID (base URL variable wasn't removed properly)
         if url.startswith(':'):
             # This is a malformed URL - the entire base was replaced with :param
-            return None
+            return (None, False)
 
         # Fix consecutive colons (:param:param)
-        url = re.sub(r':([^/]+):([^/]+)', r':\1_\2', url)
+        url = re.sub(r':([^/]+):([^/]+)', r':\1/:\2', url)
+
+        # Fix double slashes (but preserve http:// and https://)
+        if url.startswith('http://') or url.startswith('https://'):
+            # Preserve protocol, fix double slashes in the rest
+            protocol, rest = url.split('://', 1)
+            rest = re.sub(r'/+', '/', rest)
+            url = f'{protocol}://{rest}'
+        else:
+            # For relative URLs, just fix double slashes
+            url = re.sub(r'/+', '/', url)
 
         # Ensure URL starts with /
         if url and not url.startswith('/') and not url.startswith('http'):
@@ -477,14 +588,14 @@ class JSAnalyzer:
 
         # Reject if still doesn't start with / or http
         if url and not (url.startswith('/') or url.startswith('http')):
-            return None
+            return (None, False)
 
         # Make absolute URL
         if url and url.startswith('/') and base_url:
             from urllib.parse import urljoin
             url = urljoin(base_url, url)
 
-        return url
+        return (url, had_api_variable)
 
     def _is_api_url(self, url: str) -> bool:
         """Check if URL looks like an API endpoint."""
@@ -544,18 +655,40 @@ class JSAnalyzer:
         """Extract parameters from URL."""
         params = {}
 
-        # Extract query parameters
-        if '?' in url:
-            query = url.split('?')[1]
-            for param in query.split('&'):
-                if '=' in param:
-                    key = param.split('=')[0]
+        # Parse URL to separate scheme, netloc, path, and query
+        from urllib.parse import urlparse, parse_qs
+
+        try:
+            parsed = urlparse(url)
+
+            # Extract query parameters using parse_qs for proper parsing
+            if parsed.query:
+                # Use parse_qs to handle query string properly
+                query_params = parse_qs(parsed.query, keep_blank_values=True)
+                for key, values in query_params.items():
+                    # Skip invalid parameter names (numbers, function names, etc.)
+                    if key.isdigit() or key in ['encodeURIComponent', 'decodeURIComponent', 'encodeURI', 'decodeURI']:
+                        continue
+                    # Skip keys that look like template variables or function calls
+                    if '$' in key or '(' in key or ')' in key:
+                        continue
                     params[key] = "string"
 
-        # Extract path parameters
-        path_params = re.findall(r':(\w+)', url)
-        for param in path_params:
-            params[param] = "path_param"
+            # Extract path parameters only from the path part (not from scheme or port)
+            path = parsed.path
+            if path:
+                path_params = re.findall(r':(\w+)', path)
+                for param in path_params:
+                    # Skip if it's a number (port number)
+                    if param.isdigit():
+                        continue
+                    # Skip common function names
+                    if param in ['encodeURIComponent', 'decodeURIComponent', 'encodeURI', 'decodeURI']:
+                        continue
+                    params[param] = "path_param"
+        except Exception as e:
+            # Fallback to simple extraction if URL parsing fails
+            pass
 
         return params
 
@@ -577,10 +710,28 @@ class JSAnalyzer:
             'body': None
         }
 
-        # Get 500 characters before and after the match for context
-        start = max(0, match_pos - 500)
-        end = min(len(content), match_pos + 500)
+        # Only look FORWARD from the URL match (method comes after URL in code)
+        # Look for the end of the fetch/axios call (closing parenthesis)
+        # Limit to 300 characters to avoid picking up methods from other calls
+        start = match_pos
+        end = min(len(content), match_pos + 300)
         context = content[start:end]
+
+        # Find the closing parenthesis of this fetch/axios call
+        # Count opening and closing parens to find the matching close
+        paren_count = 0
+        context_end = len(context)
+        for i, char in enumerate(context):
+            if char == '(':
+                paren_count += 1
+            elif char == ')':
+                paren_count -= 1
+                if paren_count < 0:  # Found the closing paren of the call
+                    context_end = i
+                    break
+
+        # Only use context up to the closing paren
+        context = context[:context_end]
 
         try:
             # Extract HTTP method from options object
@@ -618,6 +769,7 @@ class JSAnalyzer:
             pass
 
         return result
+
 
     def analyze_html(self, html_content: str, base_url: str = "") -> List[APIEndpoint]:
         """Extract and analyze JavaScript from HTML."""

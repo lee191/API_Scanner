@@ -34,7 +34,9 @@
       "Bash(dir:*)",
       "Bash(timeout 60 python main.py full-scan http://localhost:5000 --js-path test-app/static)",
       "Bash(find:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(timeout 60 python:*)",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "ask": []

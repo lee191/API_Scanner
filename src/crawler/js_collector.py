@@ -132,18 +132,25 @@ class JSCollector:
         print("\n[*] 디렉토리 브루트포싱 시작...")
         self.discovered_paths = self.bruteforcer.brute_force()
 
-        # 3. 발견된 각 경로에서 JS 파일 수집
+        # 3. 발견된 경로에서 JS 파일 자동 크롤링 (브루트포서 기능 사용)
         if self.discovered_paths:
-            print(f"\n[*] 발견된 {len(self.discovered_paths)}개 경로에서 JS 파일 수집 중...")
-            for i, path_info in enumerate(self.discovered_paths, 1):
-                path_url = path_info['path']
-                print(f"\n[{i}/{len(self.discovered_paths)}] 크롤링: {path_url}")
-                try:
-                    self.collect_from_page(path_url)
-                    time.sleep(0.5)  # 서버 부하 방지
-                except Exception as e:
-                    print(f"[!] 크롤링 실패 ({path_url}): {e}")
-                    continue
+            print(f"\n[*] 발견된 {len(self.discovered_paths)}개 경로에서 JS 파일 크롤링 중...")
+
+            # 브루트포서의 자동 크롤링 기능 사용
+            newly_discovered_js = self.bruteforcer.crawl_discovered_paths()
+
+            # 발견된 JS 파일을 js_urls에 추가 (중복 제거)
+            for js_url in newly_discovered_js:
+                if self._is_same_domain(js_url):
+                    self.js_urls.add(js_url)
+
+            # 브루트포서에서 발견한 모든 JS 파일도 추가
+            all_bruteforce_js = self.bruteforcer.get_discovered_js_files()
+            for js_url in all_bruteforce_js:
+                if self._is_same_domain(js_url):
+                    self.js_urls.add(js_url)
+
+            print(f"[+] 브루트포싱으로 추가 발견된 JS: {len(newly_discovered_js)}개")
 
         print(f"\n[+] 브루트포싱 수집 완료: 총 {len(self.js_urls)}개 JS 파일 발견")
         return list(self.js_urls)

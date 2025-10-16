@@ -148,6 +148,7 @@ class Endpoint(Base):
     response_example = Column(Text, nullable=True)
 
     poc_code = Column(Text, nullable=True)
+    curl_command = Column(Text, nullable=True)
 
     status_code = Column(Integer, nullable=True)
     source = Column(String(200), nullable=True)
@@ -169,6 +170,7 @@ class Endpoint(Base):
             'body_example': self.body_example,
             'response_example': self.response_example,
             'poc_code': self.poc_code,
+            'curl_command': self.curl_command,
             'status_code': self.status_code,
             'source': self.source,
             'timestamp': self.timestamp.isoformat() if self.timestamp else None

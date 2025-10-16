@@ -49,23 +49,14 @@ def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: 
         output_dir = project_root / 'output' / 'web-scans' / scan_id
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Build command
-        if analysis_type == 'js_only' and js_path:
-            cmd = [
-                'python', 'main.py', 'analyze', js_path,
-                '--base-url', target_url
-            ]
-        else:
-            cmd = ['python', 'main.py', 'full-scan', target_url]
-            if js_path:
-                cmd.extend(['--js-path', js_path])
-            if scan_vulns:
-                cmd.append('--scan-vulns')
-            else:
-                cmd.append('--no-scan-vulns')
-            if bruteforce_enabled:
-                cmd.append('--bruteforce')
-            cmd.extend(['--output', str(output_dir)])
+        # Build command - always use full-scan to ensure --validate works
+        cmd = ['python', 'main.py', 'full-scan', target_url]
+        if js_path:
+            cmd.extend(['--js-path', js_path])
+        if bruteforce_enabled:
+            cmd.append('--bruteforce')
+        cmd.append('--validate')  # Always validate endpoints
+        cmd.extend(['--output', str(output_dir)])
 
         # Update progress
         with get_db() as db:
@@ -77,7 +68,6 @@ def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: 
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
         env['PYTHONUTF8'] = '1'
-        env['AI_ANALYSIS_ENABLED'] = 'true' if ai_enabled else 'false'
 
         # Execute scan
         print(f"[*] Executing command: {' '.join(cmd)}")
@@ -138,7 +128,11 @@ def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: 
                     method=HTTPMethod[ep_data['method'].upper()],
                     parameters=ep_data.get('parameters', {}),
                     source=ep_data.get('source', 'unknown'),
-                    poc_code=ep_data.get('poc_code')
+                    headers=ep_data.get('headers', {}),
+                    body_example=ep_data.get('body_example'),
+                    response_example=ep_data.get('response_example'),
+                    poc_code=ep_data.get('poc_code'),
+                    status_code=ep_data.get('status_code')
                 )
                 endpoints.append(ep)
             scan_result.endpoints = endpoints
@@ -540,361 +534,47 @@ def delete_project(project_id):
 
 @app.route('/api/vulnerability/<vuln_id>/generate-poc', methods=['POST'])
 def generate_vulnerability_poc(vuln_id):
-    """Generate PoC code for a specific vulnerability using AI."""
-    try:
-        # Get vulnerability from database
-        with get_db() as db:
-            from src.database.models import Vulnerability as VulnModel
-            vuln_db = db.query(VulnModel).filter(VulnModel.id == vuln_id).first()
-            
-            if not vuln_db:
-                return jsonify({'error': 'Vulnerability not found'}), 404
-            
-            # Check if PoC already exists
-            if vuln_db.poc_code:
-                return jsonify({
-                    'vulnerability_id': vuln_id,
-                    'poc_code': vuln_db.poc_code,
-                    'message': 'PoC already exists'
-                })
-            
-            # Convert to Vulnerability object
-            from src.utils.models import Vulnerability, VulnerabilityLevel, HTTPMethod
-            
-            # vuln_db.level is already a VulnerabilitySeverity enum, use .value to get string
-            level_str = vuln_db.level.value if hasattr(vuln_db.level, 'value') else str(vuln_db.level)
-            
-            vuln = Vulnerability(
-                type=vuln_db.type,
-                level=VulnerabilityLevel[level_str.upper()],
-                endpoint=vuln_db.endpoint,
-                method=HTTPMethod[vuln_db.method.upper()],
-                description=vuln_db.description,
-                evidence=vuln_db.evidence,
-                recommendation=vuln_db.recommendation,
-                cwe_id=vuln_db.cwe_id
-            )
-            
-            # AI-based PoC generation only
-            from src.analyzer.ai_analyzer import AIJSAnalyzer
-            ai_analyzer = AIJSAnalyzer()
-            
-            if not ai_analyzer.enabled:
-                return jsonify({
-                    'error': 'AI PoC generation is not available',
-                    'details': 'OpenAI API key is not configured. Please set OPENAI_API_KEY in config.yaml'
-                }), 503
-            
-            print(f"[*] Generating AI-based PoC for vulnerability {vuln_id}")
-            vulnerabilities = ai_analyzer.generate_vulnerability_poc([vuln])
-            
-            if not vulnerabilities or not vulnerabilities[0].poc_code:
-                return jsonify({
-                    'error': 'Failed to generate PoC',
-                    'details': 'AI PoC generation failed. Please try again later.'
-                }), 500
-            
-            poc_code = vulnerabilities[0].poc_code
-            print(f"[+] AI PoC generated successfully")
-            
-            # Update database with PoC
-            vuln_db.poc_code = poc_code
-            db.commit()
-            
-            return jsonify({
-                'vulnerability_id': vuln_id,
-                'poc_code': poc_code,
-                'message': 'PoC generated successfully'
-            })
-            
-    except Exception as e:
-        print(f"[!] Generate PoC error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Failed to generate PoC', 'details': str(e)}), 500
+    """PoC generation is no longer supported."""
+    return jsonify({
+        'error': 'PoC generation feature has been removed',
+        'details': 'AI-based PoC generation is no longer available'
+    }), 503
 
 
 @app.route('/api/scan/<scan_id>/generate-all-pocs', methods=['POST'])
 def generate_all_pocs_for_scan(scan_id):
-    """Generate PoC codes for all vulnerabilities in a scan."""
-    try:
-        with get_db() as db:
-            from src.database.models import Vulnerability as VulnModel
-            vulnerabilities = db.query(VulnModel).filter(VulnModel.scan_id == scan_id).all()
-            
-            if not vulnerabilities:
-                return jsonify({'error': 'No vulnerabilities found for this scan'}), 404
-            
-            generated_count = 0
-            skipped_count = 0
-            error_count = 0
-            
-            # Initialize AI analyzer
-            from src.analyzer.ai_analyzer import AIJSAnalyzer
-            ai_analyzer = AIJSAnalyzer()
-            
-            if not ai_analyzer.enabled:
-                return jsonify({
-                    'error': 'AI PoC generation is not available',
-                    'details': 'OpenAI API key is not configured. Please set OPENAI_API_KEY in config.yaml'
-                }), 503
-            
-            from src.utils.models import Vulnerability, VulnerabilityLevel, HTTPMethod
-            
-            for vuln_db in vulnerabilities:
-                try:
-                    # Skip if PoC already exists
-                    if vuln_db.poc_code:
-                        skipped_count += 1
-                        continue
-                    
-                    # Convert to Vulnerability object
-                    # vuln_db.level is already a VulnerabilitySeverity enum, use .value to get string
-                    level_str = vuln_db.level.value if hasattr(vuln_db.level, 'value') else str(vuln_db.level)
-                    
-                    vuln = Vulnerability(
-                        type=vuln_db.type,
-                        level=VulnerabilityLevel[level_str.upper()],
-                        endpoint=vuln_db.endpoint,
-                        method=HTTPMethod[vuln_db.method.upper()],
-                        description=vuln_db.description,
-                        evidence=vuln_db.evidence,
-                        recommendation=vuln_db.recommendation,
-                        cwe_id=vuln_db.cwe_id
-                    )
-                    
-                    # Generate PoC using AI only
-                    vulnerabilities_with_poc = ai_analyzer.generate_vulnerability_poc([vuln])
-                    if vulnerabilities_with_poc and vulnerabilities_with_poc[0].poc_code:
-                        poc_code = vulnerabilities_with_poc[0].poc_code
-                        # Update database
-                        vuln_db.poc_code = poc_code
-                        generated_count += 1
-                    else:
-                        print(f"[!] Failed to generate PoC for vulnerability {vuln_db.id}")
-                        error_count += 1
-                    
-                except Exception as e:
-                    print(f"[!] Error generating PoC for vulnerability {vuln_db.id}: {e}")
-                    error_count += 1
-                    continue
-            
-            db.commit()
-            
-            return jsonify({
-                'scan_id': scan_id,
-                'generated': generated_count,
-                'skipped': skipped_count,
-                'errors': error_count,
-                'message': f'PoC generation completed: {generated_count} generated, {skipped_count} skipped, {error_count} errors'
-            })
-            
-    except Exception as e:
-        print(f"[!] Generate all PoCs error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Failed to generate PoCs', 'details': str(e)}), 500
+    """PoC generation is no longer supported."""
+    return jsonify({
+        'error': 'PoC generation feature has been removed',
+        'details': 'AI-based PoC generation is no longer available'
+    }), 503
 
 
 @app.route('/api/endpoint/<int:endpoint_id>/curl', methods=['GET'])
 def generate_curl_command(endpoint_id):
-    """Generate curl commands for a specific endpoint."""
-    try:
-        with get_db() as db:
-            from src.database.models import Endpoint
-            endpoint_db = db.query(Endpoint).filter(Endpoint.id == endpoint_id).first()
-            
-            if not endpoint_db:
-                return jsonify({'error': 'Endpoint not found'}), 404
-            
-            # Convert to APIEndpoint model
-            from src.utils.models import APIEndpoint, HTTPMethod
-            from src.utils.curl_generator import CurlGenerator
-            
-            # Parse parameters from URL or body
-            parameters = {}
-            if endpoint_db.parameters:
-                try:
-                    parameters = json.loads(endpoint_db.parameters) if isinstance(endpoint_db.parameters, str) else endpoint_db.parameters
-                except:
-                    parameters = {}
-            
-            # Parse headers
-            headers = {}
-            if endpoint_db.headers:
-                try:
-                    headers = json.loads(endpoint_db.headers) if isinstance(endpoint_db.headers, str) else endpoint_db.headers
-                except:
-                    headers = {}
-            
-            api_endpoint = APIEndpoint(
-                url=endpoint_db.url,
-                method=HTTPMethod[endpoint_db.method.upper()],
-                parameters=parameters,
-                headers=headers,
-                body_example=endpoint_db.body_example,
-                source=endpoint_db.source
-            )
-            
-            # Generate curl commands
-            include_auth = request.args.get('include_auth', 'false').lower() == 'true'
-            auth_token = request.args.get('auth_token', '')
-            use_ai = request.args.get('use_ai', 'true').lower() == 'true'
-            
-            curl_commands = CurlGenerator.generate_curl(
-                api_endpoint,
-                include_auth=include_auth,
-                auth_token=auth_token,
-                use_ai=use_ai
-            )
-            
-            return jsonify({
-                'endpoint_id': endpoint_id,
-                'url': endpoint_db.url,
-                'method': endpoint_db.method,
-                'curl_commands': curl_commands
-            })
-            
-    except Exception as e:
-        print(f"[!] Generate curl error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Failed to generate curl command', 'details': str(e)}), 500
+    """Curl generation is no longer supported."""
+    return jsonify({
+        'error': 'Curl generation feature has been removed',
+        'details': 'Curl command generation is no longer available'
+    }), 503
 
 
 @app.route('/api/scan/<scan_id>/endpoints/curl-all', methods=['GET'])
 def generate_all_curl_commands(scan_id):
-    """Generate curl commands for all endpoints in a scan."""
-    try:
-        with get_db() as db:
-            from src.database.models import Endpoint
-            from src.utils.models import APIEndpoint, HTTPMethod
-            from src.utils.curl_generator import CurlGenerator
-            
-            endpoints = db.query(Endpoint).filter(Endpoint.scan_id == scan_id).all()
-            
-            if not endpoints:
-                return jsonify({'error': 'No endpoints found for this scan'}), 404
-            
-            include_auth = request.args.get('include_auth', 'false').lower() == 'true'
-            auth_token = request.args.get('auth_token', '')
-            
-            all_curl_commands = []
-            
-            for endpoint_db in endpoints:
-                # Parse parameters
-                parameters = {}
-                if endpoint_db.parameters:
-                    try:
-                        parameters = json.loads(endpoint_db.parameters) if isinstance(endpoint_db.parameters, str) else endpoint_db.parameters
-                    except:
-                        parameters = {}
-                
-                # Parse headers
-                headers = {}
-                if endpoint_db.headers:
-                    try:
-                        headers = json.loads(endpoint_db.headers) if isinstance(endpoint_db.headers, str) else endpoint_db.headers
-                    except:
-                        headers = {}
-                
-                api_endpoint = APIEndpoint(
-                    url=endpoint_db.url,
-                    method=HTTPMethod[endpoint_db.method.upper()],
-                    parameters=parameters,
-                    headers=headers,
-                    body_example=endpoint_db.body_example,
-                    source=endpoint_db.source
-                )
-                
-                use_ai = request.args.get('use_ai', 'true').lower() == 'true'
-                
-                curl_commands = CurlGenerator.generate_curl(
-                    api_endpoint,
-                    include_auth=include_auth,
-                    auth_token=auth_token,
-                    use_ai=use_ai
-                )
-                
-                all_curl_commands.append({
-                    'endpoint_id': endpoint_db.id,
-                    'url': endpoint_db.url,
-                    'method': endpoint_db.method,
-                    'curl_commands': curl_commands
-                })
-            
-            return jsonify({
-                'scan_id': scan_id,
-                'total_endpoints': len(all_curl_commands),
-                'endpoints': all_curl_commands
-            })
-            
-    except Exception as e:
-        print(f"[!] Generate all curl error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Failed to generate curl commands', 'details': str(e)}), 500
+    """Curl generation is no longer supported."""
+    return jsonify({
+        'error': 'Curl generation feature has been removed',
+        'details': 'Curl command generation is no longer available'
+    }), 503
 
 
 @app.route('/api/scan/<scan_id>/postman-collection', methods=['GET'])
 def generate_postman_collection(scan_id):
-    """Generate Postman collection for all endpoints in a scan."""
-    try:
-        with get_db() as db:
-            from src.database.models import Endpoint, Scan
-            from src.utils.models import APIEndpoint, HTTPMethod
-            from src.utils.curl_generator import CurlGenerator
-            
-            scan = db.query(Scan).filter(Scan.id == scan_id).first()
-            if not scan:
-                return jsonify({'error': 'Scan not found'}), 404
-            
-            endpoints_db = db.query(Endpoint).filter(Endpoint.scan_id == scan_id).all()
-            
-            if not endpoints_db:
-                return jsonify({'error': 'No endpoints found for this scan'}), 404
-            
-            # Convert to APIEndpoint objects
-            api_endpoints = []
-            for endpoint_db in endpoints_db:
-                parameters = {}
-                if endpoint_db.parameters:
-                    try:
-                        parameters = json.loads(endpoint_db.parameters) if isinstance(endpoint_db.parameters, str) else endpoint_db.parameters
-                    except:
-                        parameters = {}
-                
-                headers = {}
-                if endpoint_db.headers:
-                    try:
-                        headers = json.loads(endpoint_db.headers) if isinstance(endpoint_db.headers, str) else endpoint_db.headers
-                    except:
-                        headers = {}
-                
-                api_endpoint = APIEndpoint(
-                    url=endpoint_db.url,
-                    method=HTTPMethod[endpoint_db.method.upper()],
-                    parameters=parameters,
-                    headers=headers,
-                    body_example=endpoint_db.body_example,
-                    source=endpoint_db.source
-                )
-                api_endpoints.append(api_endpoint)
-            
-            # Generate Postman collection
-            collection_name = f"Scan {scan_id} - {scan.target_url}"
-            collection = CurlGenerator.generate_postman_collection(
-                api_endpoints,
-                collection_name
-            )
-            
-            return jsonify(collection)
-            
-    except Exception as e:
-        print(f"[!] Generate Postman collection error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': 'Failed to generate Postman collection', 'details': str(e)}), 500
+    """Postman collection generation is no longer supported."""
+    return jsonify({
+        'error': 'Postman collection generation feature has been removed',
+        'details': 'Postman collection generation is no longer available'
+    }), 503
 
 
 @app.route('/health', methods=['GET'])

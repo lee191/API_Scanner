@@ -1,502 +1,412 @@
-"""Generate curl commands for API endpoints."""
+"""cURL command generator for endpoint validation."""
 
 import json
-import re
-from typing import Dict, Optional, Tuple
-from urllib.parse import urlencode, quote
+import shlex
+from typing import Dict, Optional
+from urllib.parse import urlencode, urlparse, parse_qs, urlunparse
 from src.utils.models import APIEndpoint, HTTPMethod
 
 
 class CurlGenerator:
-    """Generate curl commands for Windows (PowerShell and CMD)."""
+    """Generate cURL commands for API endpoint validation."""
+
+    # Example values for different parameter types
+    EXAMPLE_VALUES = {
+        # Common parameter names
+        'id': '123',
+        'user_id': '1',
+        'userid': '1',
+        'post_id': '1',
+        'postid': '1',
+        'product_id': '1',
+        'productid': '1',
+        'order_id': '1',
+        'orderid': '1',
+        'item_id': '1',
+        'itemid': '1',
+
+        # Search and filter
+        'search': 'test',
+        'query': 'example',
+        'q': 'search',
+        'keyword': 'test',
+        'filter': 'active',
+        'category': 'general',
+        'tag': 'sample',
+        'tags': 'tag1,tag2',
+
+        # Pagination
+        'page': '1',
+        'limit': '10',
+        'offset': '0',
+        'size': '10',
+        'per_page': '10',
+        'perpage': '10',
+
+        # Sorting
+        'sort': 'asc',
+        'order': 'desc',
+        'orderby': 'created_at',
+        'sortby': 'name',
+
+        # User info
+        'name': 'john',
+        'username': 'johndoe',
+        'email': 'user@example.com',
+        'password': 'password123',
+
+        # Status
+        'status': 'active',
+        'state': 'pending',
+        'type': 'default',
+
+        # Date/Time
+        'date': '2024-01-01',
+        'from': '2024-01-01',
+        'to': '2024-12-31',
+        'start_date': '2024-01-01',
+        'end_date': '2024-12-31',
+
+        # Boolean
+        'active': 'true',
+        'enabled': 'true',
+        'public': 'true',
+        'published': 'true',
+
+        # Auth
+        'token': 'sample_token_123',
+        'api_key': 'api_key_123',
+        'apikey': 'api_key_123',
+        'access_token': 'access_token_123',
+    }
 
     @staticmethod
-    def _generate_curl_with_ai(endpoint: APIEndpoint, include_auth: bool = False, 
-                               auth_token: Optional[str] = None) -> Optional[Dict[str, str]]:
+    def _generate_example_value(param_name: str, param_type: str) -> str:
         """
-        Use AI to generate complete curl commands for all formats.
-        
+        Generate example value for a parameter based on its name and type.
+
         Args:
-            endpoint: API endpoint information
-            include_auth: Whether to include authentication
-            auth_token: Optional authentication token
-            
+            param_name: Name of the parameter
+            param_type: Type of the parameter (string, path_param, etc.)
+
         Returns:
-            Dict with curl commands or None if AI fails
+            Example value string
         """
-        try:
-            from src.analyzer.ai_analyzer import AIJSAnalyzer
-            ai_analyzer = AIJSAnalyzer()
-            
-            if not ai_analyzer.enabled:
-                return None
-            
-            # Prepare endpoint information
-            endpoint_data = {
-                "url": endpoint.url,
-                "method": endpoint.method.upper(),
-                "headers": endpoint.headers or {},
-                "parameters": endpoint.parameters or {},
-                "body": endpoint.body_example,
-                "source": endpoint.source
-            }
-            
-            if include_auth and auth_token:
-                endpoint_data["headers"]["Authorization"] = f"Bearer {auth_token}"
-            
-            # Extract base URL from endpoint URL for examples
-            parsed_url = endpoint.url
-            # Try to extract protocol and host
-            if parsed_url.startswith(('http://', 'https://')):
-                # Extract base URL (protocol + host + port)
-                parts = parsed_url.split('/')
-                base_url = f"{parts[0]}//{parts[2]}" if len(parts) > 2 else parsed_url
-            else:
-                # Default to discovered URL pattern
-                base_url = "http://localhost:5000"
-                if parsed_url.startswith(':'):
-                    port = parsed_url[1:].split('/')[0]
-                    if port.isdigit():
-                        base_url = f"http://localhost:{port}"
-            
-            # AI prompt for complete curl generation
-            prompt = f"""You MUST respond with ONLY a valid JSON object. No explanations, no markdown, just JSON.
+        # Normalize parameter name for matching
+        normalized_name = param_name.lower().replace('-', '_')
 
-API Endpoint:
-{json.dumps(endpoint_data, indent=2)}
+        # Check if we have a predefined example for this parameter name
+        if normalized_name in CurlGenerator.EXAMPLE_VALUES:
+            return CurlGenerator.EXAMPLE_VALUES[normalized_name]
 
-Task: Generate curl commands for Windows (PowerShell, CMD, Bash/WSL)
+        # For path parameters, use numeric IDs
+        if param_type == 'path_param':
+            # Check if it's some kind of ID
+            if 'id' in normalized_name:
+                return '123'
+            # Otherwise use the parameter name as a placeholder
+            return f'{param_name}_value'
 
-Rules:
-1. Fix malformed URLs - ensure proper protocol and host:
-   - `:5000/path` → `http://localhost:5000/path`
-   - `:port/path` → `http://localhost:port/path`
-   - `/path` → Use original base URL + `/path`
-   - Keep existing protocol and host if URL is well-formed
+        # Pattern-based matching for common cases
+        if 'email' in normalized_name:
+            return 'user@example.com'
+        elif 'phone' in normalized_name or 'mobile' in normalized_name:
+            return '1234567890'
+        elif 'url' in normalized_name or 'link' in normalized_name:
+            return 'https://example.com'
+        elif 'count' in normalized_name or 'number' in normalized_name or 'num' in normalized_name:
+            return '10'
+        elif 'price' in normalized_name or 'amount' in normalized_name:
+            return '99.99'
+        elif 'description' in normalized_name or 'desc' in normalized_name:
+            return 'sample description'
+        elif 'title' in normalized_name:
+            return 'Sample Title'
+        elif 'message' in normalized_name or 'msg' in normalized_name:
+            return 'Sample message'
+        elif 'code' in normalized_name:
+            return 'ABC123'
+        elif 'color' in normalized_name:
+            return 'blue'
+        elif 'lang' in normalized_name or 'language' in normalized_name:
+            return 'en'
+        elif 'country' in normalized_name:
+            return 'US'
+        elif 'city' in normalized_name:
+            return 'New York'
+        elif 'address' in normalized_name:
+            return '123 Main St'
+        elif 'zip' in normalized_name or 'postal' in normalized_name:
+            return '12345'
 
-2. Replace path placeholders with realistic example values:
-   - `:id` / `{{id}}` → 123
-   - `:userId` / `{{userId}}` → 123
-   - `:postId` / `{{postId}}` → 456
-   - `:param` → example_value (do NOT replace with localhost:5000)
-   
-3. Preserve the original base URL (protocol + host + port) from the endpoint
-4. Include all query parameters if present
-5. Add helpful instruction comment explaining what values to replace
-
-Response format (ONLY JSON, NO OTHER TEXT):
-{{
-  "powershell": "# Replace 123 with actual user ID\\nInvoke-WebRequest -Uri \\"{base_url}/api/users/123\\" `\\n    -Method GET `\\n    -UseBasicParsing",
-  "cmd": "REM Replace 123 with actual user ID\\ncurl.exe -X GET \\"{base_url}/api/users/123\\"",
-  "bash": "# Replace 123 with actual user ID\\ncurl -X GET '{base_url}/api/users/123'",
-  "url": "{base_url}/api/users/123",
-  "method": "GET",
-  "instruction": "Replace 123 with actual user ID"
-}}
-
-CRITICAL: Use the actual base URL from the endpoint ({base_url}), NOT a hardcoded localhost:5000.
-IMPORTANT: Return ONLY the JSON object. No markdown code blocks, no explanations."""
-            
-            response = ai_analyzer.client.chat.completions.create(
-                model=ai_analyzer.model,
-                messages=[
-                    {"role": "system", "content": "You are a JSON API. You ONLY output valid JSON. Never use markdown code blocks. Never add explanations."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-                max_tokens=1500
-            )
-            
-            content = response.choices[0].message.content.strip()
-            
-            # Remove markdown code blocks if present
-            content = re.sub(r'^```json\s*', '', content)
-            content = re.sub(r'^```\s*', '', content)
-            content = re.sub(r'\s*```$', '', content)
-            content = content.strip()
-            
-            # Try to parse JSON
-            try:
-                result = json.loads(content)
-                
-                # Validate required fields
-                if all(key in result for key in ['powershell', 'cmd', 'bash', 'url', 'method']):
-                    return result
-                else:
-                    print(f"[!] AI response missing required fields: {list(result.keys())}")
-                    return None
-            except json.JSONDecodeError as je:
-                print(f"[!] JSON parsing failed: {je}")
-                print(f"[!] AI Response: {content[:200]}...")
-                return None
-                
-        except Exception as e:
-            print(f"[!] AI curl generation failed: {e}, using basic generation")
-            return None
-    
-    @staticmethod
-    def _basic_url_cleanup(url: str) -> str:
-        """Basic URL cleanup without AI."""
-        # Fix URL starting with colon (priority: handle first!)
-        if url.startswith(':'):
-            parts = url[1:].split('/', 1)
-            first_part = parts[0]
-            path = '/' + parts[1] if len(parts) > 1 else '/'
-            
-            # Check if it's a port number or placeholder
-            if first_part.isdigit():
-                # It's a port: :5000/api/path -> http://localhost:5000/api/path
-                url = f'http://localhost:{first_part}{path}'
-            else:
-                # It's a placeholder: :param/api/path -> http://localhost:5000/api/path
-                url = f'http://localhost:5000{path}'
-        
-        # Replace common placeholders with example values (in path/query only)
-        url = re.sub(r':id\b', '1', url)
-        url = re.sub(r'\{id\}', '1', url)
-        url = re.sub(r':userId\b', '123', url)
-        url = re.sub(r'\{userId\}', '123', url)
-        url = re.sub(r':postId\b', '1', url)
-        url = re.sub(r'\{postId\}', '1', url)
-        url = re.sub(r':([a-zA-Z_][a-zA-Z0-9_]*)', r'example_\1', url)
-        url = re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', r'example_\1', url)
-        
-        # Ensure protocol
-        if not url.startswith(('http://', 'https://')):
-            url = 'http://' + url
-        
-        return url
+        # Default: use parameter name as hint
+        return f'example_{normalized_name}'
 
     @staticmethod
-    def generate_curl(endpoint: APIEndpoint, include_auth: bool = False, 
-                     auth_token: Optional[str] = None, use_ai: bool = True) -> Dict[str, str]:
+    def generate(endpoint: APIEndpoint, verbose: bool = False, include_response: bool = False) -> str:
         """
-        Generate curl commands for PowerShell, CMD, and Bash.
-        
+        Generate a cURL command for the given endpoint.
+
         Args:
-            endpoint: API endpoint information
-            include_auth: Whether to include authentication header
-            auth_token: Optional authentication token
-            use_ai: Use AI to generate complete curl commands (default: True)
-            
+            endpoint: APIEndpoint object with URL, method, parameters, headers, body
+            verbose: Include -v flag for verbose output
+            include_response: Include -i flag to show response headers
+
         Returns:
-            Dictionary with 'powershell', 'cmd', 'bash' curl commands
+            cURL command string ready to execute
         """
-        # Try AI-powered complete curl generation first
-        if use_ai:
-            ai_result = CurlGenerator._generate_curl_with_ai(endpoint, include_auth, auth_token)
-            if ai_result:
-                print("[+] AI successfully generated curl commands")
-                return ai_result
-            print("[!] AI generation failed, falling back to basic generation")
-        
-        # Fallback: Basic generation with URL cleanup
-        url = endpoint.url
-        method = endpoint.method.upper()
-        headers = endpoint.headers.copy() if endpoint.headers else {}
-        params = endpoint.parameters.copy() if endpoint.parameters else {}
-        body = endpoint.body_example
-        
-        # Clean URL with basic cleanup
-        url = CurlGenerator._basic_url_cleanup(url)
-        
-        # Add authentication if specified
-        if include_auth and auth_token:
-            headers['Authorization'] = f'Bearer {auth_token}'
-        
-        # Generate PowerShell curl (Invoke-WebRequest style)
-        powershell_cmd = CurlGenerator._generate_powershell(
-            url, method, headers, params, body
-        )
-        
-        # Generate CMD curl (traditional curl.exe style)
-        cmd_curl = CurlGenerator._generate_cmd(
-            url, method, headers, params, body
-        )
-        
-        # Generate bash-style curl (for WSL or Git Bash)
-        bash_curl = CurlGenerator._generate_bash(
-            url, method, headers, params, body
-        )
-        
-        return {
-            'powershell': powershell_cmd,
-            'cmd': cmd_curl,
-            'bash': bash_curl,
-            'url': url,
-            'method': method,
-            'instruction': ''
-        }
-    
-    @staticmethod
-    def _generate_powershell(url: str, method: str, headers: Dict[str, str],
-                            params: Dict[str, str], body: Optional[str]) -> str:
-        """Generate PowerShell Invoke-WebRequest command."""
-        # Ensure URL has protocol
-        if not url.startswith(('http://', 'https://')):
-            # Check if URL starts with :port (malformed - missing host)
-            if url.startswith(':'):
-                # Extract port and path
-                parts = url[1:].split('/', 1)
-                port = parts[0]
-                path = '/' + parts[1] if len(parts) > 1 else '/'
-                url = f'http://localhost:{port}{path}'
-            else:
-                url = 'http://' + url
-        
-        # Add query parameters to URL
-        if params:
-            # Check if URL already has query params
-            separator = '&' if '?' in url else '?'
-            param_str = urlencode(params)
-            url = f"{url}{separator}{param_str}"
-        
-        cmd_parts = [f'Invoke-WebRequest -Uri "{url}"']
-        cmd_parts.append(f'-Method {method}')
-        
+        parts = ["curl"]
+
+        # Add flags
+        if verbose:
+            parts.append("-v")
+        if include_response:
+            parts.append("-i")
+
+        # Add HTTP method
+        method = endpoint.method.value if hasattr(endpoint.method, 'value') else str(endpoint.method)
+        parts.extend(["-X", method])
+
+        # Build URL with query parameters for GET/DELETE requests
+        url = CurlGenerator._build_url(endpoint.url, endpoint.parameters, method)
+
         # Add headers
-        if headers:
-            header_dict = ', '.join([f"'{k}'='{v}'" for k, v in headers.items()])
-            cmd_parts.append(f'-Headers @{{{header_dict}}}')
-        
-        # Add body
-        if body and method in ['POST', 'PUT', 'PATCH']:
-            # Escape double quotes in JSON
-            escaped_body = body.replace('"', '`"')
-            cmd_parts.append(f'-Body "{escaped_body}"')
-            if 'Content-Type' not in headers:
-                cmd_parts.append('-ContentType "application/json"')
-        
-        # Add common options
-        cmd_parts.append('-UseBasicParsing')
-        
-        return ' `\n    '.join(cmd_parts)
-    
+        headers_added = False
+        if endpoint.headers:
+            for key, value in endpoint.headers.items():
+                parts.extend(["-H", f"{key}: {value}"])
+                headers_added = True
+
+        # Add body data for POST/PUT/PATCH requests
+        if method in ["POST", "PUT", "PATCH"]:
+            if endpoint.body_example:
+                # Try to parse as JSON first
+                try:
+                    # Validate JSON and format it
+                    json_data = json.loads(endpoint.body_example)
+                    if not headers_added or not any("content-type" in h.lower() for h in endpoint.headers.keys()):
+                        parts.extend(["-H", "Content-Type: application/json"])
+                    parts.extend(["-d", json.dumps(json_data)])
+                except (json.JSONDecodeError, TypeError):
+                    # Not JSON, treat as raw body
+                    parts.extend(["-d", endpoint.body_example])
+            elif endpoint.parameters and method != "GET":
+                # Use parameters as form data with example values for non-GET requests
+                for key, value_type in endpoint.parameters.items():
+                    # Skip path parameters (they're already in the URL)
+                    if f':{key}' in url:
+                        continue
+                    example_value = CurlGenerator._generate_example_value(key, value_type)
+                    parts.extend(["-d", f"{key}={example_value}"])
+
+        # Add URL (must be last)
+        parts.append(url)
+
+        return CurlGenerator._format_command(parts)
+
     @staticmethod
-    def _generate_cmd(url: str, method: str, headers: Dict[str, str],
-                     params: Dict[str, str], body: Optional[str]) -> str:
-        """Generate CMD curl.exe command."""
-        # Ensure URL has protocol
-        if not url.startswith(('http://', 'https://')):
-            if url.startswith(':'):
-                # Extract port and path
-                parts = url[1:].split('/', 1)
-                port = parts[0]
-                path = '/' + parts[1] if len(parts) > 1 else '/'
-                url = f'http://localhost:{port}{path}'
-            else:
-                url = 'http://' + url
-        
-        # Add query parameters to URL
-        if params:
-            separator = '&' if '?' in url else '?'
-            param_str = urlencode(params)
-            url = f"{url}{separator}{param_str}"
-        
-        cmd_parts = ['curl']
-        cmd_parts.append(f'-X {method}')
-        cmd_parts.append(f'"{url}"')
-        
-        # Add headers
-        for key, value in headers.items():
-            # Escape double quotes for CMD
-            escaped_value = value.replace('"', '\\"')
-            cmd_parts.append(f'-H "^{key}: {escaped_value}"')
-        
-        # Add body
-        if body and method in ['POST', 'PUT', 'PATCH']:
-            # Escape for CMD (complex, use file or simple approach)
-            escaped_body = body.replace('"', '\\"')
-            cmd_parts.append(f'-d "{escaped_body}"')
-            if not any('Content-Type' in h for h in headers):
-                cmd_parts.append('-H "Content-Type: application/json"')
-        
-        # Add common options
-        cmd_parts.append('-k')  # Insecure (ignore SSL)
-        cmd_parts.append('-i')  # Include response headers
-        
-        return ' ^\n    '.join(cmd_parts)
-    
-    @staticmethod
-    def _generate_bash(url: str, method: str, headers: Dict[str, str],
-                      params: Dict[str, str], body: Optional[str]) -> str:
-        """Generate bash-style curl command (for WSL, Git Bash)."""
-        # Ensure URL has protocol
-        if not url.startswith(('http://', 'https://')):
-            if url.startswith(':'):
-                # Extract port and path
-                parts = url[1:].split('/', 1)
-                port = parts[0]
-                path = '/' + parts[1] if len(parts) > 1 else '/'
-                url = f'http://localhost:{port}{path}'
-            else:
-                url = 'http://' + url
-        
-        # Add query parameters to URL
-        if params:
-            separator = '&' if '?' in url else '?'
-            param_str = urlencode(params)
-            url = f"{url}{separator}{param_str}"
-        
-        cmd_parts = ['curl']
-        cmd_parts.append(f'-X {method}')
-        cmd_parts.append(f"'{url}'")
-        
-        # Add headers
-        for key, value in headers.items():
-            cmd_parts.append(f"-H '{key}: {value}'")
-        
-        # Add body
-        if body and method in ['POST', 'PUT', 'PATCH']:
-            # Single quotes for bash
-            escaped_body = body.replace("'", "'\\''")
-            cmd_parts.append(f"-d '{escaped_body}'")
-            if not any('Content-Type' in h for h in headers):
-                cmd_parts.append("-H 'Content-Type: application/json'")
-        
-        # Add common options
-        cmd_parts.append('-k')  # Insecure (ignore SSL)
-        cmd_parts.append('-i')  # Include response headers
-        
-        return ' \\\n    '.join(cmd_parts)
-    
-    @staticmethod
-    def generate_examples() -> Dict[str, Dict[str, str]]:
-        """Generate example curl commands for common scenarios."""
-        examples = {}
-        
-        # GET request example
-        get_endpoint = APIEndpoint(
-            url="http://api.example.com/users",
-            method=HTTPMethod.GET,
-            parameters={"page": "1", "limit": "10"}
-        )
-        examples['get_request'] = CurlGenerator.generate_curl(get_endpoint)
-        
-        # POST request example
-        post_endpoint = APIEndpoint(
-            url="http://api.example.com/users",
-            method=HTTPMethod.POST,
-            headers={"Content-Type": "application/json"},
-            body_example='{"name": "John Doe", "email": "john@example.com"}'
-        )
-        examples['post_request'] = CurlGenerator.generate_curl(post_endpoint)
-        
-        # Authenticated request example
-        auth_endpoint = APIEndpoint(
-            url="http://api.example.com/profile",
-            method=HTTPMethod.GET
-        )
-        examples['auth_request'] = CurlGenerator.generate_curl(
-            auth_endpoint, 
-            include_auth=True, 
-            auth_token="your_token_here"
-        )
-        
-        return examples
-    
-    @staticmethod
-    def generate_postman_collection(endpoints: list, collection_name: str = "API Collection") -> dict:
+    def _build_url(base_url: str, parameters: Optional[Dict[str, str]], method: str) -> str:
         """
-        Generate Postman collection from endpoints.
-        
+        Build complete URL with query parameters and example values.
+
+        For GET/DELETE requests, append parameters as query string.
+        For other methods, parameters are typically sent in body.
+        """
+        if not parameters or method not in ["GET", "DELETE", "HEAD", "OPTIONS"]:
+            # Still need to replace path parameters in URL
+            if parameters:
+                url = base_url
+                for key, value_type in parameters.items():
+                    # Replace path parameters like /users/:id -> /users/123
+                    if f':{key}' in url:
+                        example_value = CurlGenerator._generate_example_value(key, value_type)
+                        url = url.replace(f':{key}', example_value)
+                return url
+            return base_url
+
+        # Parse existing URL
+        parsed = urlparse(base_url)
+        path = parsed.path
+
+        # Replace path parameters in URL
+        path_params_to_remove = []
+        for key, value_type in parameters.items():
+            if f':{key}' in path:
+                example_value = CurlGenerator._generate_example_value(key, value_type)
+                path = path.replace(f':{key}', example_value)
+                path_params_to_remove.append(key)
+
+        # Merge existing query params with new parameters (excluding path params)
+        existing_params = parse_qs(parsed.query)
+        merged_params = {**existing_params}
+
+        # Add new query parameters with example values
+        for key, value_type in parameters.items():
+            if key not in path_params_to_remove and key not in merged_params:
+                example_value = CurlGenerator._generate_example_value(key, value_type)
+                merged_params[key] = [example_value]
+
+        # Flatten single-value lists back to strings
+        query_params = {}
+        for key, values in merged_params.items():
+            query_params[key] = values[0] if len(values) == 1 else values
+
+        # Build new query string
+        new_query = urlencode(query_params, doseq=True) if query_params else ''
+
+        # Reconstruct URL with updated path
+        new_parsed = parsed._replace(path=path, query=new_query)
+        return urlunparse(new_parsed)
+
+    @staticmethod
+    def _format_command(parts: list) -> str:
+        """
+        Format cURL command parts into a readable string.
+
+        Uses shlex.quote for proper shell escaping.
+        For commands with multiple parts, format with line continuations.
+        """
+        # Quote each part properly for shell
+        quoted_parts = []
+        for i, part in enumerate(parts):
+            # Don't quote flags
+            if part.startswith("-") and not part.startswith("-d") and not part.startswith("-H") and not part.startswith("-X"):
+                quoted_parts.append(part)
+            # For -d, -H, -X flags, quote the next part
+            elif i > 0 and parts[i-1] in ["-d", "-H", "-X"]:
+                quoted_parts.append(shlex.quote(part))
+            # Quote URL (last part)
+            elif i == len(parts) - 1:
+                quoted_parts.append(shlex.quote(part))
+            else:
+                quoted_parts.append(part)
+
+        # If command is simple (curl -X METHOD url), return single line
+        if len(quoted_parts) <= 4:
+            return " ".join(quoted_parts)
+
+        # For complex commands, format with line continuations
+        result = [quoted_parts[0]]  # Start with 'curl'
+
+        for i in range(1, len(quoted_parts)):
+            part = quoted_parts[i]
+            # Add line continuation for better readability
+            if part.startswith("-"):
+                result.append(" \\\n  " + part)
+            else:
+                result.append(" " + part)
+
+        return "".join(result)
+
+    @staticmethod
+    def generate_batch(endpoints: list, output_file: Optional[str] = None) -> str:
+        """
+        Generate cURL commands for multiple endpoints.
+
         Args:
             endpoints: List of APIEndpoint objects
-            collection_name: Name for the Postman collection
-            
+            output_file: Optional file path to write commands to
+
         Returns:
-            Postman collection JSON
+            String containing all cURL commands, separated by newlines
         """
-        collection = {
-            "info": {
-                "name": collection_name,
-                "description": "Generated by Shadow API Scanner",
-                "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-            },
-            "item": []
-        }
-        
-        for endpoint in endpoints:
-            url_parts = endpoint.url.split('?')
-            base_url = url_parts[0]
-            
-            # Parse query parameters
-            query_params = []
-            if endpoint.parameters:
-                for key, value in endpoint.parameters.items():
-                    query_params.append({
-                        "key": key,
-                        "value": value
-                    })
-            
-            # Build headers
-            header_list = []
-            if endpoint.headers:
-                for key, value in endpoint.headers.items():
-                    header_list.append({
-                        "key": key,
-                        "value": value
-                    })
-            
-            # Build request item
-            item = {
-                "name": f"{endpoint.method} {base_url}",
-                "request": {
-                    "method": endpoint.method,
-                    "header": header_list,
-                    "url": {
-                        "raw": endpoint.url,
-                        "protocol": "http" if endpoint.url.startswith("http://") else "https",
-                        "host": [base_url.split('/')[2]],
-                        "path": base_url.split('/')[3:],
-                        "query": query_params
-                    }
-                }
-            }
-            
-            # Add body if applicable
-            if endpoint.body_example and endpoint.method in ['POST', 'PUT', 'PATCH']:
-                item["request"]["body"] = {
-                    "mode": "raw",
-                    "raw": endpoint.body_example,
-                    "options": {
-                        "raw": {
-                            "language": "json"
-                        }
-                    }
-                }
-            
-            collection["item"].append(item)
-        
-        return collection
+        commands = []
 
+        for i, endpoint in enumerate(endpoints, 1):
+            # Add comment with endpoint info
+            method = endpoint.method.value if hasattr(endpoint.method, 'value') else str(endpoint.method)
+            commands.append(f"\n# Endpoint {i}: {method} {endpoint.url}")
+            commands.append(f"# Source: {endpoint.source}")
 
-def main():
-    """Example usage."""
-    # Example 1: Simple GET request
-    endpoint = APIEndpoint(
-        url="http://localhost:5000/api/v1/users",
-        method=HTTPMethod.GET,
-        parameters={"page": "1", "limit": "10"}
-    )
-    
-    curl_commands = CurlGenerator.generate_curl(endpoint)
-    
-    print("=" * 80)
-    print("PowerShell Command:")
-    print("=" * 80)
-    print(curl_commands['powershell'])
-    
-    print("\n" + "=" * 80)
-    print("CMD Command:")
-    print("=" * 80)
-    print(curl_commands['cmd'])
-    
-    print("\n" + "=" * 80)
-    print("Bash Command (WSL/Git Bash):")
-    print("=" * 80)
-    print(curl_commands['bash'])
+            # Generate curl command
+            curl_cmd = CurlGenerator.generate(endpoint)
+            commands.append(curl_cmd)
+            commands.append("")  # Empty line for separation
 
+        result = "\n".join(commands)
 
-if __name__ == "__main__":
-    main()
+        # Write to file if specified
+        if output_file:
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write("#!/bin/bash\n\n")
+                f.write("# cURL commands for API endpoint validation\n")
+                f.write(f"# Generated for {len(endpoints)} endpoints\n\n")
+                f.write(result)
+            print(f"[+] cURL commands written to: {output_file}")
+
+        return result
+
+    @staticmethod
+    def generate_validation_script(endpoints: list, output_file: str = "validate_endpoints.sh") -> str:
+        """
+        Generate a bash script that tests all endpoints and reports results.
+
+        Args:
+            endpoints: List of APIEndpoint objects
+            output_file: Output file path for the script
+
+        Returns:
+            Path to the generated script
+        """
+        script_lines = [
+            "#!/bin/bash",
+            "",
+            "# API Endpoint Validation Script",
+            f"# Total endpoints: {len(endpoints)}",
+            "",
+            "echo '=== API Endpoint Validation ==='",
+            "echo ''",
+            "",
+            "PASS=0",
+            "FAIL=0",
+            "TOTAL=0",
+            ""
+        ]
+
+        for i, endpoint in enumerate(endpoints, 1):
+            method = endpoint.method.value if hasattr(endpoint.method, 'value') else str(endpoint.method)
+
+            script_lines.append(f"# Test {i}: {method} {endpoint.url}")
+            script_lines.append(f"echo 'Testing endpoint {i}/{len(endpoints)}: {method} {endpoint.url}'")
+
+            # Generate curl command with status code capture
+            curl_cmd = CurlGenerator.generate(endpoint, include_response=False)
+
+            # Add HTTP status code check
+            script_lines.append(f"HTTP_CODE=$(curl -s -o /dev/null -w '%{{http_code}}' {curl_cmd.replace('curl ', '').strip()})")
+            script_lines.append(f"TOTAL=$((TOTAL + 1))")
+            script_lines.append("")
+            script_lines.append("if [ $HTTP_CODE -ge 200 ] && [ $HTTP_CODE -lt 400 ]; then")
+            script_lines.append(f"  echo '  ✓ PASS (HTTP $HTTP_CODE)'")
+            script_lines.append("  PASS=$((PASS + 1))")
+            script_lines.append("else")
+            script_lines.append(f"  echo '  ✗ FAIL (HTTP $HTTP_CODE)'")
+            script_lines.append("  FAIL=$((FAIL + 1))")
+            script_lines.append("fi")
+            script_lines.append("echo ''")
+            script_lines.append("")
+
+        # Add summary
+        script_lines.extend([
+            "echo '=== Validation Summary ==='",
+            "echo \"Total: $TOTAL\"",
+            "echo \"Passed: $PASS\"",
+            "echo \"Failed: $FAIL\"",
+            "",
+            "if [ $FAIL -eq 0 ]; then",
+            "  echo '✓ All endpoints validated successfully!'",
+            "  exit 0",
+            "else",
+            "  echo '✗ Some endpoints failed validation'",
+            "  exit 1",
+            "fi"
+        ])
+
+        # Write script to file
+        with open(output_file, 'w', encoding='utf-8', newline='\n') as f:
+            f.write("\n".join(script_lines))
+
+        print(f"[+] Validation script created: {output_file}")
+        print(f"    Run with: bash {output_file}")
+
+        return output_file

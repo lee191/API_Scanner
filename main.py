@@ -24,7 +24,6 @@ if sys.platform == 'win32':
 from src.proxy.capture import ProxyRunner
 from src.analyzer.js_analyzer import JSAnalyzer
 from src.analyzer.endpoint_collector import EndpointCollector
-from src.scanner.vulnerability_scanner import VulnerabilityScanner
 from src.reporter.report_generator import ReportGenerator
 from src.crawler.js_collector import JSCollector
 from src.utils.models import ScanResult
@@ -121,9 +120,8 @@ def analyze(path, base_url, recursive):
 @cli.command()
 @click.argument('url')
 @click.option('--timeout', default=10, help='요청 타임아웃 (초)')
-@click.option('--skip-scan', is_flag=True, help='취약점 스캔 건너뛰기')
-def scan(url, timeout, skip_scan):
-    """URL의 API 엔드포인트를 스캔하고 보안 취약점 검사"""
+def scan(url, timeout):
+    """URL의 API 엔드포인트를 스캔"""
     print(f"{Fore.GREEN}[*] 대상 스캔: {url}{Style.RESET_ALL}\n")
 
     # Create scan result
@@ -135,21 +133,13 @@ def scan(url, timeout, skip_scan):
     # TODO: Implement URL crawling and endpoint discovery
     print(f"{Fore.YELLOW}[!] URL 크롤링 기능은 향후 추가 예정{Style.RESET_ALL}")
 
-    if not skip_scan:
-        print(f"\n{Fore.GREEN}[*] 보안 취약점 스캔 시작...{Style.RESET_ALL}")
-        scanner = VulnerabilityScanner(timeout=timeout)
-
-        # For now, just show scanner is ready
-        print(f"{Fore.CYAN}[+] 스캐너 준비 완료{Style.RESET_ALL}")
-
     scan_result.finalize()
 
 
 @cli.command()
 @click.argument('proxy_capture', type=click.Path(exists=True))
 @click.argument('js_analysis', type=click.Path(exists=True))
-@click.option('--scan-vulns', is_flag=True, help='취약점 스캔 수행')
-def combine(proxy_capture, js_analysis, scan_vulns):
+def combine(proxy_capture, js_analysis):
     """프록시 캡처와 JS 분석 결과 결합"""
     print(f"{Fore.GREEN}[*] 결과 결합 중...{Style.RESET_ALL}\n")
 
@@ -167,12 +157,12 @@ def combine(proxy_capture, js_analysis, scan_vulns):
 @cli.command()
 @click.argument('target')
 @click.option('--js-path', type=click.Path(exists=True), help='JavaScript 파일/디렉토리')
-@click.option('--scan-vulns/--no-scan-vulns', default=True, help='취약점 스캔 수행 여부')
 @click.option('--bruteforce/--no-bruteforce', default=False, help='디렉토리 브루트포싱 활성화')
 @click.option('--wordlist', type=click.Path(exists=True), help='브루트포싱 wordlist 경로')
+@click.option('--validate/--no-validate', default=True, help='엔드포인트 HTTP 검증 활성화')
 @click.option('--output', default='output', help='출력 디렉토리')
-def full_scan(target, js_path, scan_vulns, bruteforce, wordlist, output):
-    """전체 스캔 수행 (JS 분석 + 취약점 스캔 + 리포트)"""
+def full_scan(target, js_path, bruteforce, wordlist, validate, output):
+    """전체 스캔 수행 (JS 분석 + 리포트)"""
     print(f"{Fore.GREEN}[*] 전체 스캔 시작: {target}{Style.RESET_ALL}\n")
 
     scan_result = ScanResult(
@@ -183,7 +173,7 @@ def full_scan(target, js_path, scan_vulns, bruteforce, wordlist, output):
     collector = EndpointCollector()
 
     # JavaScript 수집 및 분석
-    print(f"{Fore.CYAN}[1/4] JavaScript 파일 수집 중...{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}[1/3] JavaScript 파일 수집 중...{Style.RESET_ALL}")
 
     # 임시 디렉토리 생성
     temp_js_dir = Path(output) / 'temp_js'
@@ -225,7 +215,7 @@ def full_scan(target, js_path, scan_vulns, bruteforce, wordlist, output):
     if files:
         print(f"{Fore.GREEN}  [OK] 수집된 JS 파일: {len(files)}개{Style.RESET_ALL}\n")
 
-        print(f"{Fore.CYAN}[2/4] JavaScript 분석 중...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}[2/3] JavaScript 분석 중...{Style.RESET_ALL}")
         analyzer = JSAnalyzer()
 
         for file in tqdm(files, desc="파일 분석"):
@@ -236,33 +226,40 @@ def full_scan(target, js_path, scan_vulns, bruteforce, wordlist, output):
     else:
         print(f"{Fore.YELLOW}  [!] JavaScript 파일을 찾을 수 없습니다{Style.RESET_ALL}\n")
 
-    # Vulnerability scanning
-    if scan_vulns and collector.get_endpoints():
-        print(f"{Fore.CYAN}[3/4] 보안 취약점 스캔 중...{Style.RESET_ALL}")
-        scanner = VulnerabilityScanner()
+    # Validate endpoints
+    all_endpoints = collector.get_endpoints()
 
-        endpoints = collector.get_endpoints()
-        for endpoint in tqdm(endpoints, desc="엔드포인트 스캔"):
-            try:
-                vulns = scanner.scan_endpoint(endpoint)
-                scan_result.vulnerabilities.extend(vulns)
-            except Exception as e:
-                continue
+    if validate and all_endpoints:
+        print(f"{Fore.CYAN}[2.5/3] 엔드포인트 검증 중...{Style.RESET_ALL}")
+        from src.utils.endpoint_validator import EndpointValidator
 
-        vuln_stats = scanner.get_statistics()
-        print(f"{Fore.GREEN}  [OK] 발견된 취약점: {vuln_stats['total']}개{Style.RESET_ALL}")
-        if vuln_stats['critical'] > 0:
-            print(f"{Fore.RED}    - Critical: {vuln_stats['critical']}개{Style.RESET_ALL}")
-        if vuln_stats['high'] > 0:
-            print(f"{Fore.YELLOW}    - High: {vuln_stats['high']}개{Style.RESET_ALL}")
-        print()
+        validator = EndpointValidator(timeout=5)
 
-        # PoC 생성은 웹 UI에서 사용자가 선택한 취약점에 대해서만 수행
-        # 자동 생성은 비활성화 (Web UI의 "PoC 생성" 버튼 사용)
-        print(f"{Fore.CYAN}[*] PoC 코드는 Web UI에서 개별적으로 생성할 수 있습니다{Style.RESET_ALL}\n")
+        valid_count = 0
+        invalid_count = 0
+
+        # Validate each endpoint with progress bar
+        for endpoint in tqdm(all_endpoints, desc="검증 중"):
+            is_valid, status_code, response = validator.validate_endpoint(endpoint)
+
+            # Update endpoint with validation result
+            endpoint.status_code = status_code
+            endpoint.response_example = response
+
+            if is_valid:
+                valid_count += 1
+            else:
+                invalid_count += 1
+
+        validator.close()
+
+        # Print validation summary
+        print(f"{Fore.GREEN}  [OK] 검증 완료{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}    - 유효한 엔드포인트: {valid_count}개 ({valid_count*100//(valid_count+invalid_count) if (valid_count+invalid_count) > 0 else 0}%){Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}    - 무효한 엔드포인트 (False Positive): {invalid_count}개 ({invalid_count*100//(valid_count+invalid_count) if (valid_count+invalid_count) > 0 else 0}%){Style.RESET_ALL}\n")
 
     # Add endpoints to result
-    scan_result.endpoints = collector.get_endpoints()
+    scan_result.endpoints = all_endpoints
     scan_result.finalize()
 
     # Save to database
@@ -282,8 +279,8 @@ def full_scan(target, js_path, scan_vulns, bruteforce, wordlist, output):
                 scan_id=scan_id,
                 target_url=target,
                 js_path=js_path,
-                scan_vulns=scan_vulns,
-                ai_enabled=os.getenv('AI_ANALYSIS_ENABLED', 'true').lower() == 'true',
+                scan_vulns=False,
+                ai_enabled=False,
                 bruteforce_enabled=bruteforce,
                 analysis_type='full_scan'
             )
@@ -300,7 +297,7 @@ def full_scan(target, js_path, scan_vulns, bruteforce, wordlist, output):
         print(f"{Fore.YELLOW}  [!] 데이터베이스 저장 실패: {e}{Style.RESET_ALL}")
 
     # Generate reports
-    print(f"{Fore.CYAN}[4/4] 리포트 생성 중...{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}[3/3] 리포트 생성 중...{Style.RESET_ALL}")
     reporter = ReportGenerator(output_dir=output)
     reports = reporter.generate_all(scan_result, prefix="full_scan")
 
@@ -308,7 +305,6 @@ def full_scan(target, js_path, scan_vulns, bruteforce, wordlist, output):
     print(f"{Fore.GREEN}[OK] 스캔 완료!{Style.RESET_ALL}\n")
     print(f"{Fore.CYAN}[*] 결과 요약:{Style.RESET_ALL}")
     print(f"  - 엔드포인트: {scan_result.statistics['total_endpoints']}개")
-    print(f"  - 취약점: {scan_result.statistics['total_vulnerabilities']}개")
     print(f"\n{Fore.CYAN}[*] 생성된 리포트:{Style.RESET_ALL}")
     for format_type, path in reports.items():
         print(f"  - {format_type.upper()}: {path}")

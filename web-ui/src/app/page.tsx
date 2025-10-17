@@ -69,14 +69,11 @@ export default function ImprovedHome() {
   const [activeTab, setActiveTab] = useState<'scan' | 'dashboard' | 'history' | 'projects'>('projects');
   const [expandedEndpoints, setExpandedEndpoints] = useState<Set<string>>(new Set());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [scanSubTab, setScanSubTab] = useState<'settings' | 'progress' | 'help'>('settings');
+  const [scanSubTab, setScanSubTab] = useState<'settings' | 'progress' | 'help' | 'summary'>('settings');
 
   // 대시보드 상태
   const [dashStats, setDashStats] = useState<any>(null);
   const [loadingStats, setLoadingStats] = useState(false);
-  const [selectedEndpoint, setSelectedEndpoint] = useState<string | null>(null);
-  const [endpointVulnerabilities, setEndpointVulnerabilities] = useState<any[]>([]);
-  const [showEndpointVulnModal, setShowEndpointVulnModal] = useState(false);
 
   // 필터링 상태
   const [searchQuery, setSearchQuery] = useState('');
@@ -167,46 +164,7 @@ export default function ImprovedHome() {
     }
   };
 
-  // 엔드포인트의 취약점 로드
-  const loadEndpointVulnerabilities = async (endpoint: string) => {
-    if (!selectedProject) return;
 
-    try {
-      // 프로젝트의 모든 스캔에서 해당 엔드포인트의 취약점 조회
-      const response = await api.get(`/api/projects/${selectedProject}`);
-      const scans = response.data.scans || [];
-      
-      // 모든 완료된 스캔의 취약점을 수집
-      const allVulns: any[] = [];
-      for (const scan of scans) {
-        if (scan.status === 'completed') {
-          try {
-            const scanResponse = await api.get(`/api/status/${scan.scan_id}`);
-            const scanResult = scanResponse.data.result;
-            if (scanResult && scanResult.vulnerabilities) {
-              const endpointVulns = scanResult.vulnerabilities.filter(
-                (v: any) => v.endpoint === endpoint
-              );
-              allVulns.push(...endpointVulns.map((v: any) => ({
-                ...v,
-                scan_id: scan.scan_id,
-                scan_date: scan.created_at
-              })));
-            }
-          } catch (err) {
-            console.error(`Failed to load vulnerabilities for scan ${scan.scan_id}:`, err);
-          }
-        }
-      }
-
-      setSelectedEndpoint(endpoint);
-      setEndpointVulnerabilities(allVulns);
-      setShowEndpointVulnModal(true);
-    } catch (err) {
-      console.error('Failed to load endpoint vulnerabilities:', err);
-      alert('취약점 정보를 불러올 수 없습니다');
-    }
-  };
 
   // 히스토리 항목 클릭 시 상세 페이지로 이동
   const loadScanDetails = (scanId: string, targetUrl: string) => {
@@ -403,10 +361,6 @@ export default function ImprovedHome() {
         csv += `Endpoint,${ep.method},"${ep.url}",N/A,N/A\n`;
       });
 
-      (result.vulnerabilities || []).forEach((vuln: any) => {
-        csv += `Vulnerability,${vuln.method},"${vuln.endpoint}",${vuln.level},"${vuln.type}"\n`;
-      });
-
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -434,6 +388,7 @@ export default function ImprovedHome() {
     setExpandedEndpoints(new Set());
     setLogs([]);
     setShowLogs(true);
+    setScanSubTab('progress'); // 진행상황 탭으로 자동 전환
     addLog('스캔 시작...');
 
     try {
@@ -442,7 +397,6 @@ export default function ImprovedHome() {
         target_url: targetUrl,
         js_path: jsPath || undefined,
         project_id: selectedProject,
-        scan_vulns: analysisMode !== 'static',
         ai_enabled: analysisMode === 'ai' || analysisMode === 'both',
         static_only: analysisMode === 'static',
         ai_only: analysisMode === 'ai',
@@ -528,6 +482,7 @@ export default function ImprovedHome() {
           setProgress(100);
           setStatusMessage('스캔 완료!');
           addLog('스캔 완료!');
+          setScanSubTab('summary'); // 결과요약 탭으로 자동 전환
           // 프로젝트 히스토리 새로고침
           if (selectedProject) {
             loadProjectHistory(selectedProject);
@@ -725,7 +680,7 @@ export default function ImprovedHome() {
             </h1>
             <p className="text-gray-400">
               {activeTab === 'projects' && '프로젝트를 생성하고 관리합니다'}
-              {activeTab === 'scan' && '웹 애플리케이션의 Shadow API와 취약점을 탐지합니다'}
+              {activeTab === 'scan' && '웹 애플리케이션의 API 엔드포인트를 탐지하고 분석합니다'}
               {activeTab === 'dashboard' && '스캔 결과를 시각화하여 분석합니다'}
               {activeTab === 'history' && '과거 스캔 기록을 조회하고 관리합니다'}
             </p>
@@ -877,35 +832,17 @@ export default function ImprovedHome() {
                 statusMessage={statusMessage}
                 scanId={scanId}
                 error={error}
+                scanSubTab={scanSubTab}
+                setScanSubTab={setScanSubTab}
+                result={result}
+                logs={logs}
+                showLogs={showLogs}
+                setShowLogs={setShowLogs}
               />
             )}
 
-            
-            {/* Logs Panel */}
-            {showLogs && logs.length > 0 && (
-              <div className="bg-black/40 backdrop-blur-lg rounded-xl p-6 mb-8 border border-white/10">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Terminal className="w-5 h-5 text-green-400" />
-                    실시간 로그
-                  </h3>
-                  <button
-                    onClick={() => setShowLogs(false)}
-                    className="text-gray-400 hover:text-white transition"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="bg-gray-900 rounded-lg p-4 max-h-60 overflow-y-auto font-mono text-xs text-green-400">
-                  {logs.map((log, i) => (
-                    <div key={i}>{log}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Results */}
-            {result && (
+            {/* Results - Moved to Summary Tab */}
+            {false && result && (
                   <div className="bg-white/10 backdrop-blur-lg rounded-lg p-8">
                     {/* Header with Export */}
                     <div className="flex items-center justify-between mb-6">
@@ -1361,6 +1298,13 @@ export default function ImprovedHome() {
               <>
                 {(() => {
                   const { overview, vulnerabilities, endpoints, timeline, recent_activity } = dashStats;
+                  
+                  // 백엔드에서 계산한 상태 코드별 카운트 사용
+                  const count2xx = overview.count_2xx || 0;
+                  const count3xx = overview.count_3xx || 0;
+                  const count4xx = overview.count_4xx || 0;
+                  const count5xx = overview.count_5xx || 0;
+                  
                   return (
                 <div className="space-y-6">
                   {/* 프로젝트 헤더 */}
@@ -1406,34 +1350,9 @@ export default function ImprovedHome() {
                       </div>
                       <div className="text-gray-300 text-sm">총 엔드포인트</div>
                       <div className="mt-2 text-xs">
-                        <span className="text-red-400">Shadow: {overview.shadow_apis}</span>
+                        <span className="text-red-400">4xx/5xx: {overview.shadow_apis}</span>
                         <span className="text-gray-400 mx-1">|</span>
-                        <span className="text-green-400">Public: {overview.public_apis}</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/10">
-                      <div className="flex items-center justify-between mb-2">
-                        <AlertTriangle className="w-8 h-8 text-orange-400" />
-                        <div className="text-3xl font-bold text-white">{overview.total_vulnerabilities}</div>
-                      </div>
-                      <div className="text-gray-300 text-sm">총 취약점</div>
-                      <div className="mt-2 flex items-center gap-1 text-xs">
-                        {vulnerabilities.by_severity.critical > 0 && (
-                          <span className="px-2 py-0.5 bg-red-500/20 text-red-300 rounded">
-                            C: {vulnerabilities.by_severity.critical}
-                          </span>
-                        )}
-                        {vulnerabilities.by_severity.high > 0 && (
-                          <span className="px-2 py-0.5 bg-orange-500/20 text-orange-300 rounded">
-                            H: {vulnerabilities.by_severity.high}
-                          </span>
-                        )}
-                        {vulnerabilities.by_severity.medium > 0 && (
-                          <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-300 rounded">
-                            M: {vulnerabilities.by_severity.medium}
-                          </span>
-                        )}
+                        <span className="text-green-400">2xx: {overview.public_apis}</span>
                       </div>
                     </div>
 
@@ -1463,11 +1382,11 @@ export default function ImprovedHome() {
                       <div className="space-y-3 max-h-[300px] overflow-y-auto">
                         <div className="flex items-center justify-between mb-3 pb-3 border-b border-white/10">
                           <div className="flex items-center gap-4">
-                            <span className="text-sm font-semibold text-red-400">
-                              Shadow: {overview.shadow_apis}
-                            </span>
                             <span className="text-sm font-semibold text-green-400">
-                              Public: {overview.public_apis}
+                              2xx: {overview.public_apis}
+                            </span>
+                            <span className="text-sm font-semibold text-red-400">
+                              4xx/5xx: {overview.shadow_apis}
                             </span>
                           </div>
                           <span className="text-sm text-gray-400">
@@ -1580,82 +1499,51 @@ export default function ImprovedHome() {
                     )}
                   </div>
 
-                  {/* 상위 취약 엔드포인트 */}
-                  {vulnerabilities.top_vulnerable_endpoints.length > 0 && (
-                    <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/10">
-                      <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5 text-yellow-400" />
-                        상위 취약 엔드포인트 (Top 10)
-                      </h3>
-                      <p className="text-gray-400 text-sm mb-4">클릭하여 해당 엔드포인트의 취약점 상세 정보를 확인하세요</p>
-                      <div className="space-y-2">
-                        {vulnerabilities.top_vulnerable_endpoints.map((item: any, index: number) => (
-                          <div 
-                            key={index}
-                            onClick={() => loadEndpointVulnerabilities(item.endpoint)}
-                            className="flex items-center justify-between p-3 bg-white/5 rounded-lg hover:bg-white/10 transition cursor-pointer group"
-                          >
-                            <div className="flex items-center gap-3 flex-1 min-w-0">
-                              <div className="flex-shrink-0 w-6 h-6 bg-red-500/20 text-red-300 rounded-full flex items-center justify-center text-xs font-bold">
-                                {index + 1}
-                              </div>
-                              <code className="text-gray-300 text-sm truncate group-hover:text-white">{item.endpoint}</code>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="flex-shrink-0 px-3 py-1 bg-red-500/20 text-red-300 rounded-full text-sm font-semibold">
-                                {item.count} 취약점
-                              </div>
-                              <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-white" />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
 
-                  {/* API 타입 분포 */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-gradient-to-br from-red-500/20 to-red-600/20 backdrop-blur-lg rounded-lg p-6 border border-red-500/30">
-                      <div className="flex items-center justify-between mb-3">
-                        <Eye className="w-8 h-8 text-red-400" />
-                        <div className="text-3xl font-bold text-white">{overview.shadow_apis}</div>
-                      </div>
-                      <div className="text-gray-200 font-semibold mb-1">Shadow APIs</div>
-                      <div className="text-red-200 text-sm">
-                        문서화되지 않은 숨겨진 API
-                      </div>
-                      <div className="mt-3 text-xs text-red-300">
-                        전체의 {endpoints.shadow_ratio}%
-                      </div>
-                    </div>
 
+                  {/* API 상태 코드 분포 */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="bg-gradient-to-br from-green-500/20 to-green-600/20 backdrop-blur-lg rounded-lg p-6 border border-green-500/30">
                       <div className="flex items-center justify-between mb-3">
-                        <FileText className="w-8 h-8 text-green-400" />
-                        <div className="text-3xl font-bold text-white">{overview.public_apis}</div>
+                        <CheckCircle className="w-8 h-8 text-green-400" />
+                        <div className="text-3xl font-bold text-white">{count2xx}</div>
                       </div>
-                      <div className="text-gray-200 font-semibold mb-1">Public APIs</div>
+                      <div className="text-gray-200 font-semibold mb-1">2xx Success</div>
                       <div className="text-green-200 text-sm">
-                        공개 문서화된 API
-                      </div>
-                      <div className="mt-3 text-xs text-green-300">
-                        전체의 {100 - endpoints.shadow_ratio}%
+                        정상 응답 API
                       </div>
                     </div>
 
-                    <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/20 backdrop-blur-lg rounded-lg p-6 border border-purple-500/30">
+                    <div className="bg-gradient-to-br from-blue-500/20 to-cyan-500/20 backdrop-blur-lg rounded-lg p-6 border border-cyan-500/30">
                       <div className="flex items-center justify-between mb-3">
-                        <Calendar className="w-8 h-8 text-purple-400" />
-                        <div className="text-3xl font-bold text-white">{recent_activity.scans_last_30_days}</div>
+                        <Globe className="w-8 h-8 text-cyan-400" />
+                        <div className="text-3xl font-bold text-white">{count3xx}</div>
                       </div>
-                      <div className="text-gray-200 font-semibold mb-1">최근 활동</div>
-                      <div className="text-purple-200 text-sm">
-                        지난 30일간 스캔 수
+                      <div className="text-gray-200 font-semibold mb-1">3xx Redirect</div>
+                      <div className="text-cyan-200 text-sm">
+                        리다이렉트 API
                       </div>
-                      <div className="mt-3 text-xs text-purple-300">
-                        {recent_activity.scans_last_30_days > 0 
-                          ? `평균 ${(recent_activity.scans_last_30_days / 30).toFixed(1)}회/일`
-                          : '활동 없음'}
+                    </div>
+
+                    <div className="bg-gradient-to-br from-orange-500/20 to-orange-600/20 backdrop-blur-lg rounded-lg p-6 border border-orange-500/30">
+                      <div className="flex items-center justify-between mb-3">
+                        <AlertTriangle className="w-8 h-8 text-orange-400" />
+                        <div className="text-3xl font-bold text-white">{count4xx}</div>
+                      </div>
+                      <div className="text-gray-200 font-semibold mb-1">4xx Client Error</div>
+                      <div className="text-orange-200 text-sm">
+                        클라이언트 오류
+                      </div>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-red-500/20 to-red-600/20 backdrop-blur-lg rounded-lg p-6 border border-red-500/30">
+                      <div className="flex items-center justify-between mb-3">
+                        <AlertTriangle className="w-8 h-8 text-red-400" />
+                        <div className="text-3xl font-bold text-white">{count5xx}</div>
+                      </div>
+                      <div className="text-gray-200 font-semibold mb-1">5xx Server Error</div>
+                      <div className="text-red-200 text-sm">
+                        서버 오류
                       </div>
                     </div>
                   </div>
@@ -1773,17 +1661,26 @@ export default function ImprovedHome() {
                           <span className="text-gray-300">
                             엔드포인트: {item.result?.statistics?.total_endpoints || 0}
                           </span>
-                          <span className="text-gray-300">
-                            Shadow APIs: {item.result?.statistics?.shadow_apis || 0}
-                          </span>
+                          {item.result?.statistics?.count_2xx > 0 && (
+                            <span className="text-green-400">
+                              ✓ 2xx: {item.result?.statistics?.count_2xx}
+                            </span>
+                          )}
+                          {item.result?.statistics?.count_3xx > 0 && (
+                            <span className="text-cyan-400">
+                              ↪ 3xx: {item.result?.statistics?.count_3xx}
+                            </span>
+                          )}
+                          {(item.result?.statistics?.count_4xx > 0 || item.result?.statistics?.count_5xx > 0) && (
+                            <span className="text-orange-400">
+                              ⚠ 4xx/5xx: {(item.result?.statistics?.count_4xx || 0) + (item.result?.statistics?.count_5xx || 0)}
+                            </span>
+                          )}
                           {item.result?.statistics?.discovered_paths > 0 && (
                             <span className="text-purple-300">
                               발견된 경로: {item.result?.statistics?.discovered_paths || 0}
                             </span>
                           )}
-                          <span className="text-gray-300">
-                            취약점: {item.result?.statistics?.total_vulnerabilities || 0}
-                          </span>
                         </div>
                         {isCompleted ? (
                           <div className="mt-3 text-blue-400 text-sm flex items-center gap-1">
@@ -1930,93 +1827,6 @@ export default function ImprovedHome() {
                     </button>
                   </div>
                 </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 엔드포인트 취약점 모달 */}
-        {showEndpointVulnModal && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-900 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                      <AlertTriangle className="w-6 h-6 text-yellow-400" />
-                      엔드포인트 취약점 상세
-                    </h3>
-                    <code className="text-gray-400 text-sm mt-2 block">{selectedEndpoint}</code>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowEndpointVulnModal(false);
-                      setSelectedEndpoint(null);
-                      setEndpointVulnerabilities([]);
-                    }}
-                    className="text-gray-400 hover:text-white"
-                  >
-                    <X className="w-6 h-6" />
-                  </button>
-                </div>
-
-                {endpointVulnerabilities.length === 0 ? (
-                  <div className="text-center py-12">
-                    <AlertTriangle className="w-16 h-16 text-gray-500 mx-auto mb-4" />
-                    <p className="text-gray-400">이 엔드포인트에 대한 취약점이 없습니다</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <p className="text-gray-300">
-                        총 <span className="text-white font-bold">{endpointVulnerabilities.length}개</span>의 취약점이 발견되었습니다
-                      </p>
-                    </div>
-
-                    {endpointVulnerabilities.map((vuln: any, index: number) => (
-                      <div
-                        key={index}
-                        className={`rounded-lg border-l-4 p-5 ${
-                          vuln.level === 'critical' ? 'bg-red-500/20 border-red-500' :
-                          vuln.level === 'high' ? 'bg-orange-500/20 border-orange-500' :
-                          vuln.level === 'medium' ? 'bg-yellow-500/20 border-yellow-500' :
-                          'bg-blue-500/20 border-blue-500'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <h4 className="font-bold text-white text-lg">{vuln.type}</h4>
-                              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                                vuln.level === 'critical' ? 'bg-red-500' :
-                                vuln.level === 'high' ? 'bg-orange-500' :
-                                vuln.level === 'medium' ? 'bg-yellow-500' :
-                                'bg-blue-500'
-                              } text-white uppercase`}>
-                                {vuln.level}
-                              </span>
-                            </div>
-                            <p className="text-gray-200 text-sm mb-2">{vuln.description}</p>
-                            <div className="flex items-center gap-4 text-xs text-gray-400">
-                              <span className="flex items-center gap-1">
-                                <Calendar className="w-3 h-3" />
-                                {new Date(vuln.scan_date).toLocaleString()}
-                              </span>
-                              <code className="px-2 py-1 bg-black/30 rounded">{vuln.method}</code>
-                            </div>
-                          </div>
-                        </div>
-
-                        {vuln.recommendation && (
-                          <div className="mt-3 p-3 bg-black/30 rounded">
-                            <p className="text-white font-semibold text-sm mb-1">💡 권장사항:</p>
-                            <p className="text-gray-300 text-sm">{vuln.recommendation}</p>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           </div>

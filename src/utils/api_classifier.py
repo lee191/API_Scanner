@@ -196,29 +196,64 @@ class APIClassifier:
         return "Default classification (no public indicators found)"
 
 
-def classify_endpoints(endpoints: list, source: str = None) -> Dict[str, list]:
+def classify_endpoints_by_status(endpoints: list) -> Dict[str, list]:
     """
-    Classify a list of endpoints into shadow and public APIs.
+    Classify endpoints by HTTP status code.
 
     Args:
         endpoints: List of APIEndpoint objects
-        source: Source of the endpoints
 
     Returns:
-        Dictionary with 'shadow_apis' and 'public_apis' lists
+        Dictionary with endpoints grouped by status code category
     """
-    shadow_apis = []
-    public_apis = []
+    categorized = {
+        'success': [],      # 2xx
+        'redirect': [],     # 3xx
+        'client_error': [], # 4xx
+        'server_error': [], # 5xx
+        'unknown': []       # No status code or other
+    }
 
     for endpoint in endpoints:
-        is_shadow = APIClassifier.classify(endpoint, source)
-
-        if is_shadow:
-            shadow_apis.append(endpoint)
+        status = endpoint.status_code if hasattr(endpoint, 'status_code') else None
+        
+        if status is None:
+            categorized['unknown'].append(endpoint)
+        elif 200 <= status < 300:
+            categorized['success'].append(endpoint)
+        elif 300 <= status < 400:
+            categorized['redirect'].append(endpoint)
+        elif 400 <= status < 500:
+            categorized['client_error'].append(endpoint)
+        elif 500 <= status < 600:
+            categorized['server_error'].append(endpoint)
         else:
-            public_apis.append(endpoint)
+            categorized['unknown'].append(endpoint)
+
+    return categorized
+
+
+def classify_endpoints(endpoints: list, source: str = None) -> Dict[str, list]:
+    """
+    Classify endpoints by status code instead of shadow/public.
+    Maintains backward compatibility with old structure.
+
+    Args:
+        endpoints: List of APIEndpoint objects
+        source: Source of the endpoints (kept for compatibility)
+
+    Returns:
+        Dictionary with endpoint categorization by status
+    """
+    categorized = classify_endpoints_by_status(endpoints)
+    
+    # For backward compatibility, still provide shadow_apis/public_apis
+    # But now based on status codes
+    shadow_apis = categorized['client_error'] + categorized['server_error']
+    public_apis = categorized['success'] + categorized['redirect'] + categorized['unknown']
 
     return {
-        'shadow_apis': shadow_apis,
-        'public_apis': public_apis
+        'shadow_apis': shadow_apis,  # Errors (4xx, 5xx)
+        'public_apis': public_apis,  # Success/Redirect (2xx, 3xx, unknown)
+        'by_status': categorized     # New: detailed status categorization
     }

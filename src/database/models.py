@@ -77,7 +77,6 @@ class Scan(Base):
     progress = Column(Integer, default=0)
     message = Column(Text, nullable=True)
 
-    scan_vulns = Column(Boolean, default=True)
     ai_enabled = Column(Boolean, default=True)
     bruteforce_enabled = Column(Boolean, default=False)
     analysis_type = Column(String(50), default='full_scan')
@@ -113,7 +112,6 @@ class Scan(Base):
             'status': self.status.value,
             'progress': self.progress,
             'message': self.message,
-            'scan_vulns': self.scan_vulns,
             'ai_enabled': self.ai_enabled,
             'bruteforce_enabled': self.bruteforce_enabled,
             'analysis_type': self.analysis_type,

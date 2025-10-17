@@ -35,7 +35,7 @@ scan_processes = {}
 scan_subprocesses = {}
 
 
-def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: bool, ai_enabled: bool, bruteforce_enabled: bool, analysis_type: str, analysis_mode: str = 'both', crawl_depth: int = 1, max_pages: int = 50):
+def execute_scan_async(scan_id: str, target_url: str, js_path: str, ai_enabled: bool, bruteforce_enabled: bool, analysis_type: str, analysis_mode: str = 'both', crawl_depth: int = 1, max_pages: int = 50):
     """Execute scan asynchronously and update database."""
     try:
         print(f"\n{'='*60}", flush=True)
@@ -221,7 +221,6 @@ def start_scan():
         target_url = data.get('target_url')
         js_path = data.get('js_path')
         project_id = data.get('project_id')
-        scan_vulns = data.get('scan_vulns', True)
         ai_enabled = data.get('ai_enabled', True)
         bruteforce_enabled = data.get('bruteforce_enabled', False)
         analysis_type = data.get('analysis_type', 'full_scan')
@@ -239,13 +238,13 @@ def start_scan():
         with get_db() as db:
             ScanRepository.create_scan(
                 db, scan_id, target_url, js_path, project_id,
-                scan_vulns, ai_enabled, bruteforce_enabled, analysis_type
+                ai_enabled, bruteforce_enabled, analysis_type
             )
 
         # Start scan in background thread
         thread = threading.Thread(
             target=execute_scan_async,
-            args=(scan_id, target_url, js_path, scan_vulns, ai_enabled, bruteforce_enabled, analysis_type, analysis_mode, crawl_depth, max_pages)
+            args=(scan_id, target_url, js_path, ai_enabled, bruteforce_enabled, analysis_type, analysis_mode, crawl_depth, max_pages)
         )
         thread.daemon = True
         thread.start()
@@ -443,6 +442,12 @@ def get_project_statistics(project_id):
             shadow_apis = len([e for e in endpoints if e.is_shadow_api])
             public_apis = len([e for e in endpoints if not e.is_shadow_api])
             
+            # Status code distribution
+            count_2xx = len([e for e in endpoints if e.status_code and 200 <= e.status_code < 300])
+            count_3xx = len([e for e in endpoints if e.status_code and 300 <= e.status_code < 400])
+            count_4xx = len([e for e in endpoints if e.status_code and 400 <= e.status_code < 500])
+            count_5xx = len([e for e in endpoints if e.status_code and 500 <= e.status_code < 600])
+            
             # Method distribution
             method_counts = {}
             for ep in endpoints:
@@ -525,7 +530,11 @@ def get_project_statistics(project_id):
                     'total_endpoints': total_endpoints,
                     'shadow_apis': shadow_apis,
                     'public_apis': public_apis,
-                    'total_vulnerabilities': total_vulns
+                    'total_vulnerabilities': total_vulns,
+                    'count_2xx': count_2xx,
+                    'count_3xx': count_3xx,
+                    'count_4xx': count_4xx,
+                    'count_5xx': count_5xx
                 },
                 'vulnerabilities': {
                     'by_severity': vuln_by_severity,
@@ -534,7 +543,13 @@ def get_project_statistics(project_id):
                 },
                 'endpoints': {
                     'by_method': method_counts,
-                    'shadow_ratio': round((shadow_apis / total_endpoints * 100) if total_endpoints > 0 else 0, 1)
+                    'shadow_ratio': round((shadow_apis / total_endpoints * 100) if total_endpoints > 0 else 0, 1),
+                    'by_status_code': {
+                        '2xx': count_2xx,
+                        '3xx': count_3xx,
+                        '4xx': count_4xx,
+                        '5xx': count_5xx
+                    }
                 },
                 'timeline': timeline,
                 'recent_activity': {

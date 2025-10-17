@@ -54,3 +54,20 @@ Thumbs.db
 *.old
 ground_truth_old.json
 ground_truth_complete.json
+
+# Development files (removed from production)
+CLAUDE.md
+CACHE_BUG_FIX.md
+DUPLICATE_ENDPOINT_FIX.md
+SETUP_FILES_GUIDE.md
+accuracy/
+test-scripts/
+scripts/
+docs/
+run-ai-comparison.bat
+run-ai-comparison-full.bat
+run-ai-comparison-log.bat
+quick-setup.ps1
+
+# Database migration scripts
+remove_vulns_column.py

@@ -361,7 +361,6 @@ def full_scan(target, js_path, bruteforce, wordlist, validate, ai, static_only, 
                 scan_id=scan_id,
                 target_url=target,
                 js_path=js_path,
-                scan_vulns=ai,
                 ai_enabled=ai,
                 bruteforce_enabled=bruteforce,
                 analysis_type='full_scan'

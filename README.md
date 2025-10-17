@@ -1,6 +1,6 @@
 # 🔍 Shadow API Scanner
 
-> 웹 애플리케이션의 숨겨진 API를 탐색하고 보안 취약점을 분석하는 모의 침투 테스트 도구
+> 웹 애플리케이션의 숨겨진 API를 탐색하고 분석하는 자동화 도구
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-14.2-black.svg)](https://nextjs.org/)
@@ -8,91 +8,115 @@
 
 ## 📋 개요
 
-Shadow API Scanner는 자동화된 API 탐색 및 보안 취약점 분석 도구입니다.
+Shadow API Scanner는 자동화된 API 탐색 도구입니다.
 
 - 🔍 **Shadow API 자동 발견**: JavaScript 정적 분석 (Regex + AST 파싱) + AI 추론 (GPT-4o)
 - 🤖 **AI 기반 분석**: 복잡한 패턴 인식 및 숨겨진 엔드포인트 추론
-- 🛡️ **OWASP Top 10 스캔**: SQL Injection, XSS, 인증 누락 등
+- �️ **재귀 크롤링**: 1-5단계 깊이 설정, 최대 200페이지 탐색
 - 📊 **포괄적인 리포트**: JSON/HTML/Markdown 형식
 - 🌐 **현대적인 Web UI**: Next.js 기반 대시보드
 - 💾 **데이터베이스 통합**: 스캔 이력 및 프로젝트 관리
 
 ## 🚀 빠른 시작
 
-### 설치
+### 📦 설치 가이드
+
+**빠른 시작**: [QUICK_START.md](QUICK_START.md) (5분 가이드)  
+**전체 가이드**: [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) (상세 설명 + 문제 해결)
 
 ```bash
-# 저장소 클론
-git clone <repository-url>
+# 1. 저장소 클론
+git clone https://github.com/lee191/API_Scanner.git
 cd API_Scanner
 
-# Python 의존성 설치
+# 2. Python 가상환경 생성 (권장)
+python -m venv venv
+# Windows: .\venv\Scripts\Activate.ps1
+# Linux/macOS: source venv/bin/activate
+
+# 3. Python 의존성 설치
 pip install -r requirements.txt
 
-# 데이터베이스 초기화
+# 4. 데이터베이스 초기화
 python setup_db.py
 
-# (선택) Web UI 설정
+# 5. OpenAI API 키 설정 (AI 분석 사용 시)
+# Windows: $env:OPENAI_API_KEY = "sk-your-api-key"
+# Linux/macOS: export OPENAI_API_KEY="sk-your-api-key"
+
+# 6. Web UI 설정
 cd web-ui
 npm install
+cd ..
 ```
 
-### 사용 방법
+### 🖥️ 서버 실행
 
-#### CLI 모드
+#### Web UI 모드 (권장)
 ```bash
-# 전체 스캔
-python main.py full-scan http://localhost:5000 \
-  --js-path ./static \
-  --scan-vulns \
-  --bruteforce
-```
-
-#### Web UI 모드
-```bash
-# Terminal 1: API 서버
+# Terminal 1: 백엔드 API 서버
 python api_server.py
 
-# Terminal 2: Web UI
+# Terminal 2: 프론트엔드 개발 서버
 cd web-ui
 npm run dev
 ```
 
 브라우저에서 http://localhost:3000 접속
 
+#### CLI 모드
+```bash
+# 기본 스캔
+python main.py full-scan http://localhost:5000
+
+# 고급 옵션
+python main.py full-scan http://example.com \
+  --ai \
+  --bruteforce \
+  --crawl-depth 3 \
+  --max-pages 100 \
+  --validate
+```
+
 ## 📖 문서
 
-**완전한 문서는 [DOCUMENTATION.md](DOCUMENTATION.md)를 참조하세요.**
+| 문서 | 설명 |
+|------|------|
+| [🚀 QUICK_START.md](QUICK_START.md) | 5분 빠른 시작 가이드 |
+| [📦 INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) | 완전한 설치 및 실행 가이드 (문제 해결 포함) |
+| [📚 DOCUMENTATION.md](DOCUMENTATION.md) | 전체 프로젝트 문서 (아키텍처, API, 모듈) |
+| [📊 ACCURACY_ANALYSIS_v2.md](ACCURACY_ANALYSIS_v2.md) | AI vs 정적 분석 정확도 비교 |
+| [📋 PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) | 프로젝트 개요 및 기술 스택 |
 
-포함 내용:
-- 상세 설치 가이드
-- 아키텍처 및 모듈 설명
-- API 참조
-- AI 기능 활용법
-- 데이터베이스 스키마
-- 테스트 가이드
-- 문제 해결 방법
+### 주요 내용
+- ✅ 시스템 요구사항 및 설치 방법
+- ✅ 단계별 설정 가이드 (백엔드/프론트엔드)
+- ✅ 웹 UI 사용법 (프로젝트 생성 ~ 스캔 실행)
+- ✅ CLI 명령어 및 옵션
+- ✅ 크롤링 깊이 설정
+- ✅ 테스트 앱 실행 방법
+- ✅ 문제 해결 (포트 충돌, API 키, 패키지 오류 등)
+- ✅ 아키텍처 및 모듈 상세 설명
+- ✅ 데이터베이스 스키마
+- ✅ AI 기능 활용법
 
 ## 🎯 주요 기능
 
-### API 탐색
-- ✅ JavaScript 정적 분석 (Regex + AST)
-- 🤖 AI 기반 엔드포인트 추론 (GPT-4o)
-- ✅ 디렉토리 브루트포싱 (Wordlist 기반)
-- ✅ 네트워크 트래픽 캡처 (mitmproxy)
+### 🔍 API 탐색
+- ✅ **JavaScript 정적 분석**: Regex + AST 파싱으로 엔드포인트 추출
+- 🤖 **AI 기반 분석**: GPT-4o로 숨겨진 엔드포인트 추론
+- 🕸️ **재귀 크롤링**: 1~5단계 깊이 설정 가능
+- 🔍 **디렉토리 브루트포싱**: Wordlist 기반 숨겨진 경로 탐색
+- 📡 **네트워크 트래픽 캡처**: mitmproxy 통합
+- ✔️ **HTTP 검증**: 실제 엔드포인트 유효성 확인
 
-### 보안 취약점 스캔
-- 🔴 SQL Injection (CWE-89)
-- 🔴 XSS (CWE-79)
-- 🟠 Missing Authentication (CWE-306)
-- 🟠 CORS Misconfiguration (CWE-942)
-- 🟠 Sensitive Data Exposure (CWE-200)
-- 🟡 Missing Rate Limiting (CWE-770)
-
-### 리포팅
-- 📄 JSON (구조화된 데이터)
-- 📄 HTML (시각화된 대시보드)
-- 📄 Markdown (문서화 친화적)
+###  리포팅 & 관리
+- 📄 **다중 포맷**: JSON / HTML / Markdown
+- 💾 **프로젝트 관리**: SQLite 데이터베이스
+- � **통계 대시보드**: 실시간 스캔 모니터링
+- � **고급 필터링**: 메서드/상태코드/탐지방법별 필터
+- 📜 **스캔 히스토리**: 전체 스캔 기록 추적
+- 🏷️ **AI 배지**: AI로만 발견된 엔드포인트 표시
 
 ## 🧪 테스트
 
@@ -108,7 +132,7 @@ test-scripts\run-test.bat       # Windows
 # 수동 테스트
 python main.py full-scan http://localhost:5000 \
   --js-path test-app/static \
-  --scan-vulns
+  --ai
 ```
 
 ## 📊 예상 결과
@@ -116,7 +140,7 @@ python main.py full-scan http://localhost:5000 \
 테스트 앱 (test-app) 스캔 시:
 - **엔드포인트**: 15+ 개 발견
 - **Shadow APIs**: 5+ 개 탐지
-- **취약점**: 20+ 개 발견
+- **AI 추론**: GPT-4o 기반 엔드포인트 분석
   - Critical: 2+ (SQL Injection)
   - High: 8+ (인증 누락, XSS 등)
   - Medium: 10+ (Rate Limiting 등)
@@ -134,7 +158,6 @@ API_Scanner/
 │   ├── proxy/              # 프록시 캡처
 │   ├── crawler/            # JS 수집 + 브루트포싱
 │   ├── analyzer/           # JS 분석 (Regex + AI)
-│   ├── scanner/            # 취약점 스캐너
 │   ├── reporter/           # 리포트 생성
 │   ├── database/           # DB 모델 및 Repository
 │   └── utils/              # 공통 유틸리티

@@ -42,6 +42,10 @@ interface Statistics {
   high?: number;
   medium?: number;
   low?: number;
+  count_2xx?: number;
+  count_3xx?: number;
+  count_4xx?: number;
+  count_5xx?: number;
 }
 
 interface ScanDetail {
@@ -327,22 +331,26 @@ export default function ScanDetailPage() {
             </div>
 
             {/* Statistics Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-6">
               <div className="bg-blue-500/20 rounded-lg p-4 border border-blue-500/30">
-                <div className="text-blue-300 text-sm mb-1">엔드포인트</div>
+                <div className="text-blue-300 text-sm mb-1">총 엔드포인트</div>
                 <div className="text-3xl font-bold text-blue-400">{stats.total_endpoints || 0}</div>
               </div>
-              <div className="bg-red-500/20 rounded-lg p-4 border border-red-500/30">
-                <div className="text-red-300 text-sm mb-1">Shadow APIs</div>
-                <div className="text-3xl font-bold text-red-400">{stats.shadow_apis || 0}</div>
-              </div>
               <div className="bg-green-500/20 rounded-lg p-4 border border-green-500/30">
-                <div className="text-green-300 text-sm mb-1">Public APIs</div>
-                <div className="text-3xl font-bold text-green-400">{stats.public_apis || 0}</div>
+                <div className="text-green-300 text-sm mb-1">2xx 성공</div>
+                <div className="text-3xl font-bold text-green-400">{stats.count_2xx || 0}</div>
               </div>
-              <div className="bg-purple-500/20 rounded-lg p-4 border border-purple-500/30">
-                <div className="text-purple-300 text-sm mb-1">발견된 경로</div>
-                <div className="text-3xl font-bold text-purple-400">{stats.discovered_paths || 0}</div>
+              <div className="bg-cyan-500/20 rounded-lg p-4 border border-cyan-500/30">
+                <div className="text-cyan-300 text-sm mb-1">3xx 리다이렉트</div>
+                <div className="text-3xl font-bold text-cyan-400">{stats.count_3xx || 0}</div>
+              </div>
+              <div className="bg-orange-500/20 rounded-lg p-4 border border-orange-500/30">
+                <div className="text-orange-300 text-sm mb-1">4xx 클라이언트 에러</div>
+                <div className="text-3xl font-bold text-orange-400">{stats.count_4xx || 0}</div>
+              </div>
+              <div className="bg-red-500/20 rounded-lg p-4 border border-red-500/30">
+                <div className="text-red-300 text-sm mb-1">5xx 서버 에러</div>
+                <div className="text-3xl font-bold text-red-400">{stats.count_5xx || 0}</div>
               </div>
             </div>
           </div>
@@ -543,13 +551,13 @@ export default function ScanDetailPage() {
                     const filteredShadow = filterAndSortEndpoints(scanData.result!.shadow_apis, 'shadow');
                     return (
                       <>
-                        <h3 className="text-xl font-bold text-red-400 mb-3">
-                          🔴 Shadow APIs ({filteredShadow.length}/{scanData.result!.shadow_apis.length})
+                        <h3 className="text-xl font-bold text-blue-400 mb-3">
+                          � 엔드포인트 목록 ({filteredShadow.length}/{scanData.result!.shadow_apis.length})
                         </h3>
                         {filteredShadow.length === 0 ? (
                           <div className="text-center py-8 text-gray-400">
                             <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                            <p>필터 조건에 맞는 Shadow API가 없습니다</p>
+                            <p>필터 조건에 맞는 엔드포인트가 없습니다</p>
                           </div>
                         ) : (
                           <div className="space-y-2">
@@ -557,16 +565,16 @@ export default function ScanDetailPage() {
                               const key = `shadow-${index}`;
                               const isExpanded = expandedEndpoints.has(key);
                       return (
-                        <div key={key} className="bg-red-500/20 border border-red-500/50 rounded-lg overflow-hidden">
+                        <div key={key} className="bg-gray-500/20 border border-gray-500/50 rounded-lg overflow-hidden">
                           <div
-                            className="p-4 flex items-center justify-between cursor-pointer hover:bg-red-500/30 transition"
+                            className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-500/30 transition"
                             onClick={() => toggleEndpoint(key)}
                           >
                             <div className="flex items-center gap-4 flex-1">
                               <span className={`px-3 py-1 rounded text-sm font-semibold ${getMethodColor(endpoint.method)}`}>
                                 {endpoint.method}
                               </span>
-                              <code className="text-red-200 font-semibold">{endpoint.url}</code>
+                              <code className="text-gray-200 font-semibold">{endpoint.url}</code>
                               {endpoint.status_code && (
                                 <span className={`px-2 py-1 rounded text-xs font-semibold ml-2 ${
                                   endpoint.status_code >= 200 && endpoint.status_code < 300 ? 'bg-green-500/30 text-green-300' :

@@ -123,7 +123,6 @@ class ScanRepository:
         target_url: str,
         js_path: Optional[str] = None,
         project_id: Optional[str] = None,
-        scan_vulns: bool = True,
         ai_enabled: bool = True,
         bruteforce_enabled: bool = False,
         analysis_type: str = 'full_scan'
@@ -142,7 +141,6 @@ class ScanRepository:
             target_url=target_url,
             js_path=js_path,
             status=ScanStatus.PENDING,
-            scan_vulns=scan_vulns,
             ai_enabled=ai_enabled,
             bruteforce_enabled=bruteforce_enabled,
             analysis_type=analysis_type,
@@ -289,6 +287,13 @@ class ScanRepository:
         # Add discovered paths
         discovered_paths = [dp.to_dict() for dp in scan.discovered_paths]
 
+        # Calculate status code counts
+        all_endpoints = scan.endpoints
+        count_2xx = len([e for e in all_endpoints if e.status_code and 200 <= e.status_code < 300])
+        count_3xx = len([e for e in all_endpoints if e.status_code and 300 <= e.status_code < 400])
+        count_4xx = len([e for e in all_endpoints if e.status_code and 400 <= e.status_code < 500])
+        count_5xx = len([e for e in all_endpoints if e.status_code and 500 <= e.status_code < 600])
+        
         # Build result dictionary with nested structure for frontend
         result = {
             'scan_id': scan.scan_id,
@@ -304,7 +309,11 @@ class ScanRepository:
                     'shadow_apis': scan.shadow_apis,
                     'public_apis': scan.public_apis,
                     'total_vulnerabilities': scan.total_vulnerabilities,
-                    'discovered_paths': len(discovered_paths)
+                    'discovered_paths': len(discovered_paths),
+                    'count_2xx': count_2xx,
+                    'count_3xx': count_3xx,
+                    'count_4xx': count_4xx,
+                    'count_5xx': count_5xx
                 },
                 'shadow_apis': shadow_apis,
                 'public_apis': public_apis,
@@ -325,8 +334,16 @@ class ScanRepository:
     def get_scan_history(db: Session, limit: int = 10) -> List[dict]:
         """Get scan history for display."""
         scans = ScanRepository.get_all_scans(db, limit=limit)
-        return [
-            {
+        result = []
+        
+        for scan in scans:
+            # Calculate status code counts from endpoints
+            count_2xx = len([e for e in scan.endpoints if e.status_code and 200 <= e.status_code < 300])
+            count_3xx = len([e for e in scan.endpoints if e.status_code and 300 <= e.status_code < 400])
+            count_4xx = len([e for e in scan.endpoints if e.status_code and 400 <= e.status_code < 500])
+            count_5xx = len([e for e in scan.endpoints if e.status_code and 500 <= e.status_code < 600])
+            
+            result.append({
                 'id': scan.scan_id,
                 'target': scan.target_url,
                 'timestamp': scan.created_at.isoformat() if scan.created_at else None,
@@ -337,12 +354,16 @@ class ScanRepository:
                         'shadow_apis': scan.shadow_apis,
                         'public_apis': scan.public_apis,
                         'total_vulnerabilities': scan.total_vulnerabilities,
-                        'discovered_paths': len(scan.discovered_paths) if scan.discovered_paths else 0
+                        'discovered_paths': len(scan.discovered_paths) if scan.discovered_paths else 0,
+                        'count_2xx': count_2xx,
+                        'count_3xx': count_3xx,
+                        'count_4xx': count_4xx,
+                        'count_5xx': count_5xx
                     }
                 }
-            }
-            for scan in scans
-        ]
+            })
+        
+        return result
 
     @staticmethod
     def delete_scan(db: Session, scan_id: str) -> bool:

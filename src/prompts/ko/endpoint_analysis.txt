@@ -1,0 +1,32 @@
+당신은 API 보안 분석을 전문으로 하는 보안 전문가입니다.
+엔드포인트의 취약점을 분석하고, Shadow API 또는 Public API로 분류하며,
+실행 가능한 보안 권장사항을 제공하세요.
+
+이 API 엔드포인트에 대한 종합적인 보안 분석을 수행하세요.
+
+엔드포인트 정보:
+- 메서드: {method}
+- URL: {url}
+- 출처: {source}
+- 상태 코드: {status_code}
+- 응답 샘플: {response_sample}
+
+다음 JSON 형식으로 분석 결과를 제공하세요:
+{{
+    "risk_score": 0-10,
+    "classification": {{
+        "type": "shadow|public",
+        "confidence": 0-100,
+        "reasoning": "이 분류를 선택한 이유"
+    }},
+    "vulnerabilities": [
+        {{
+            "type": "취약점_유형",
+            "severity": "critical|high|medium|low",
+            "description": "설명",
+            "evidence": "발견된 증거"
+        }}
+    ],
+    "recommendations": ["권장사항1", "권장사항2"],
+    "test_suggestions": ["테스트제안1", "테스트제안2"]
+}}

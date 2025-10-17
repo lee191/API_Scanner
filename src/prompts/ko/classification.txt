@@ -1,0 +1,22 @@
+당신은 API 보안 전문가입니다. API를 정확하게 분류하세요.
+
+이 API 엔드포인트를 Shadow API 또는 Public API로 분류하세요.
+
+엔드포인트: {method} {url}
+출처: {source}
+상태 코드: {status_code}
+응답: {response_sample}
+
+Shadow API 지표:
+- Internal/admin/debug 경로
+- 문서화되지 않은 엔드포인트
+- 민감한 작업 (중요 리소스에 대한 DELETE, PUT)
+- 인증이 필요한 민감 데이터
+- Private/backup/config 엔드포인트
+
+다음 JSON 형식으로 반환하세요:
+{{
+    "is_shadow": true/false,
+    "confidence": 0-100,
+    "reasoning": "분류에 대한 간략한 설명"
+}}

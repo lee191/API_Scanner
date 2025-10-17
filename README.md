@@ -10,7 +10,8 @@
 
 Shadow API Scanner는 자동화된 API 탐색 및 보안 취약점 분석 도구입니다.
 
-- 🔍 **Shadow API 자동 발견**: JavaScript 정적 분석 (Regex + AST 파싱)
+- 🔍 **Shadow API 자동 발견**: JavaScript 정적 분석 (Regex + AST 파싱) + AI 추론 (GPT-4o)
+- 🤖 **AI 기반 분석**: 복잡한 패턴 인식 및 숨겨진 엔드포인트 추론
 - 🛡️ **OWASP Top 10 스캔**: SQL Injection, XSS, 인증 누락 등
 - 📊 **포괄적인 리포트**: JSON/HTML/Markdown 형식
 - 🌐 **현대적인 Web UI**: Next.js 기반 대시보드
@@ -76,6 +77,7 @@ npm run dev
 
 ### API 탐색
 - ✅ JavaScript 정적 분석 (Regex + AST)
+- 🤖 AI 기반 엔드포인트 추론 (GPT-4o)
 - ✅ 디렉토리 브루트포싱 (Wordlist 기반)
 - ✅ 네트워크 트래픽 캡처 (mitmproxy)
 
@@ -150,6 +152,17 @@ API_Scanner/
 ```bash
 # Database
 DATABASE_URL=sqlite:///data/scanner.db
+
+# OpenAI Configuration (AI 기능 사용 시 필수)
+OPENAI_API_KEY=your-api-key-here
+
+# AI Model Selection
+# Options: gpt-4o (권장), gpt-4-turbo, gpt-4o-mini (비용 효율적)
+AI_MODEL=gpt-4o
+
+# AI Prompt Language
+# Options: ko (한국어), en (English)
+AI_PROMPT_LANGUAGE=ko
 ```
 
 ### 설정 파일 (config/config.yaml)

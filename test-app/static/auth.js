@@ -20,12 +20,15 @@ async function login(username, password) {
         if (data.success) {
             // 토큰 저장
             localStorage.setItem('auth_token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
+            localStorage.setItem('api_key', data.api_key);
 
-            console.log('Login successful:', data.user);
+            console.log('Login successful');
+            console.log('Token:', data.token);
+            console.log('API Key:', data.api_key);
+
             return data;
         } else {
-            console.error('Login failed:', data.message);
+            console.error('Login failed');
             return null;
         }
     } catch (error) {
@@ -34,47 +37,11 @@ async function login(username, password) {
     }
 }
 
-// 회원가입
-async function register(username, password, email) {
-    const response = await fetch(`${AUTH_API}/register`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password, email })
-    });
-
-    return response.json();
-}
-
-// 비밀번호 리셋
-async function resetPassword(userId, newPassword) {
-    // 취약점: userId를 직접 전달
-    const response = await fetch(`${AUTH_API}/reset-password`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            user_id: userId,
-            new_password: newPassword
-        })
-    });
-
-    return response.json();
-}
-
 // 로그아웃
 function logout() {
     localStorage.removeItem('auth_token');
-    localStorage.removeItem('user');
+    localStorage.removeItem('api_key');
     window.location.href = '/';
-}
-
-// 현재 사용자 확인
-function getCurrentUser() {
-    const userStr = localStorage.getItem('user');
-    return userStr ? JSON.parse(userStr) : null;
 }
 
 // 인증 토큰 가져오기
@@ -98,28 +65,6 @@ async function authenticatedRequest(url, options = {}) {
     });
 }
 
-// Axios 스타일 인터셉터
-const authAxios = {
-    get: async (url) => {
-        return authenticatedRequest(url, { method: 'GET' });
-    },
-    post: async (url, data) => {
-        return authenticatedRequest(url, {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-    },
-    put: async (url, data) => {
-        return authenticatedRequest(url, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-    },
-    delete: async (url) => {
-        return authenticatedRequest(url, { method: 'DELETE' });
-    }
-};
-
 // 자동 로그인 (개발용)
 if (document.location.search.includes('auto_login=true')) {
     login('admin', 'admin123').then(data => {
@@ -130,11 +75,7 @@ if (document.location.search.includes('auto_login=true')) {
 // 내보내기
 window.auth = {
     login,
-    register,
-    resetPassword,
     logout,
-    getCurrentUser,
-    getAuthToken
+    getAuthToken,
+    authenticatedRequest
 };
-
-window.authAxios = authAxios;

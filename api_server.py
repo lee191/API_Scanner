@@ -35,14 +35,22 @@ scan_processes = {}
 scan_subprocesses = {}
 
 
-def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: bool, ai_enabled: bool, bruteforce_enabled: bool, analysis_type: str):
+def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: bool, ai_enabled: bool, bruteforce_enabled: bool, analysis_type: str, analysis_mode: str = 'both', crawl_depth: int = 1, max_pages: int = 50):
     """Execute scan asynchronously and update database."""
     try:
+        print(f"\n{'='*60}", flush=True)
+        print(f"[SCAN START] Scan ID: {scan_id}", flush=True)
+        print(f"[SCAN START] Target: {target_url}", flush=True)
+        print(f"[SCAN START] Crawl Depth: {crawl_depth}", flush=True)
+        print(f"[SCAN START] Max Pages: {max_pages}", flush=True)
+        print(f"{'='*60}\n", flush=True)
+
         # Update status to running
         with get_db() as db:
             ScanRepository.update_scan_status(
                 db, scan_id, ScanStatus.RUNNING, 10, 'Starting scan...'
             )
+        print(f"[*] Database status updated to RUNNING", flush=True)
 
         # Get project root
         project_root = Path(__file__).parent
@@ -56,6 +64,22 @@ def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: 
         if bruteforce_enabled:
             cmd.append('--bruteforce')
         cmd.append('--validate')  # Always validate endpoints
+        
+        # Crawl depth and max pages
+        cmd.extend(['--crawl-depth', str(crawl_depth)])
+        cmd.extend(['--max-pages', str(max_pages)])
+
+        # Analysis mode handling
+        if analysis_mode == 'static':
+            cmd.append('--static-only')
+        elif analysis_mode == 'ai':
+            cmd.append('--ai-only')
+        elif analysis_mode == 'both':
+            cmd.append('--ai')
+        elif ai_enabled:
+            # Backward compatibility
+            cmd.append('--ai')
+
         cmd.extend(['--output', str(output_dir)])
 
         # Update progress
@@ -70,7 +94,7 @@ def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: 
         env['PYTHONUTF8'] = '1'
 
         # Execute scan
-        print(f"[*] Executing command: {' '.join(cmd)}")
+        print(f"[*] Executing command: {' '.join(cmd)}", flush=True)
         process = subprocess.Popen(
             cmd,
             cwd=str(project_root),
@@ -84,21 +108,33 @@ def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: 
 
         # Store subprocess for potential cancellation
         scan_subprocesses[scan_id] = process
+        print(f"[*] Subprocess started with PID: {process.pid}", flush=True)
 
-        # Wait for completion with timeout
+        # Wait for completion with timeout and capture output
         try:
+            print(f"[*] Waiting for scan {scan_id} to complete...", flush=True)
             stdout, stderr = process.communicate(timeout=900)  # 15 minutes
-            result = type('obj', (object,), {'stdout': stdout, 'stderr': stderr, 'returncode': process.returncode})()
+            returncode = process.returncode
+
+            print(f"[*] Scan {scan_id} process completed with return code: {returncode}", flush=True)
+            if stdout:
+                print(f"[*] Command stdout:\n{stdout[:500]}", flush=True)  # Print first 500 chars
+            if stderr:
+                print(f"[*] Command stderr:\n{stderr[:500]}", flush=True)  # Print first 500 chars
+
+            if returncode != 0:
+                error_msg = f"Scan process failed with return code {returncode}\nStderr: {stderr}"
+                print(f"[!] ERROR: {error_msg}", flush=True)
+                raise Exception(error_msg)
+
         except subprocess.TimeoutExpired:
+            print(f"[!] Scan {scan_id} timed out after 900 seconds", flush=True)
             process.kill()
             stdout, stderr = process.communicate()
             raise subprocess.TimeoutExpired(cmd, 900)
 
-        print(f"[*] Command stdout: {result.stdout}")
-        if result.stderr:
-            print(f"[*] Command stderr: {result.stderr}")
-
         # Update progress
+        print(f"[*] Updating progress to 80% - Processing results...", flush=True)
         with get_db() as db:
             ScanRepository.update_scan_status(
                 db, scan_id, ScanStatus.RUNNING, 80, 'Processing results...'
@@ -107,10 +143,13 @@ def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: 
         # Read JSON result
         json_files = list(output_dir.glob('*.json'))
         if not json_files:
-            raise Exception('No JSON report generated')
+            error_msg = f'No JSON report generated in {output_dir}'
+            print(f"[!] ERROR: {error_msg}", flush=True)
+            print(f"[!] Directory contents: {list(output_dir.iterdir())}", flush=True)
+            raise Exception(error_msg)
 
         json_path = json_files[0]
-        print(f"[*] Reading JSON file: {json_path}")
+        print(f"[*] Reading JSON file: {json_path}", flush=True)
 
         with open(json_path, 'r', encoding='utf-8') as f:
             result_data = json.load(f)
@@ -138,24 +177,28 @@ def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: 
             scan_result.endpoints = endpoints
 
         # Save to database
+        print(f"[*] Saving scan result to database...", flush=True)
         with get_db() as db:
             ScanRepository.save_scan_result(
                 db, scan_id, scan_result, str(output_dir)
             )
 
-        print(f"[+] Scan {scan_id} completed successfully")
+        print(f"\n{'='*60}", flush=True)
+        print(f"[+] Scan {scan_id} completed successfully", flush=True)
+        print(f"{'='*60}\n", flush=True)
 
     except subprocess.TimeoutExpired:
-        print(f"[!] Scan {scan_id} timed out")
+        print(f"\n[!] Scan {scan_id} timed out", flush=True)
         with get_db() as db:
             ScanRepository.update_scan_status(
                 db, scan_id, ScanStatus.FAILED, 0, 'Scan timeout'
             )
 
     except Exception as e:
-        print(f"[!] Scan {scan_id} failed: {e}")
+        print(f"\n[!] Scan {scan_id} failed: {e}", flush=True)
         import traceback
         traceback.print_exc()
+        sys.stdout.flush()
         with get_db() as db:
             ScanRepository.update_scan_status(
                 db, scan_id, ScanStatus.FAILED, 0, f'Scan failed: {str(e)}'
@@ -163,6 +206,7 @@ def execute_scan_async(scan_id: str, target_url: str, js_path: str, scan_vulns: 
 
     finally:
         # Remove from active processes
+        print(f"[*] Cleaning up scan {scan_id}", flush=True)
         if scan_id in scan_processes:
             del scan_processes[scan_id]
         if scan_id in scan_subprocesses:
@@ -181,6 +225,9 @@ def start_scan():
         ai_enabled = data.get('ai_enabled', True)
         bruteforce_enabled = data.get('bruteforce_enabled', False)
         analysis_type = data.get('analysis_type', 'full_scan')
+        analysis_mode = data.get('analysis_mode', 'both')  # 'static', 'ai', 'both'
+        crawl_depth = data.get('crawl_depth', 1)  # 크롤링 깊이 (기본값: 1)
+        max_pages = data.get('max_pages', 50)  # 최대 페이지 수 (기본값: 50)
 
         if not target_url:
             return jsonify({'error': 'target_url is required'}), 400
@@ -198,7 +245,7 @@ def start_scan():
         # Start scan in background thread
         thread = threading.Thread(
             target=execute_scan_async,
-            args=(scan_id, target_url, js_path, scan_vulns, ai_enabled, bruteforce_enabled, analysis_type)
+            args=(scan_id, target_url, js_path, scan_vulns, ai_enabled, bruteforce_enabled, analysis_type, analysis_mode, crawl_depth, max_pages)
         )
         thread.daemon = True
         thread.start()
@@ -229,7 +276,14 @@ def get_scan_status(scan_id):
             return jsonify({'error': 'Scan not found'}), 404
 
         # discovered_paths are now loaded directly from database
-        return jsonify(result)
+        response = jsonify(result)
+
+        # Prevent caching for real-time status updates
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+
+        return response
 
     except Exception as e:
         print(f"[!] Get status error: {e}")

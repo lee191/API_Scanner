@@ -16,7 +16,7 @@ class JSCollector:
 
     def __init__(self, base_url: str, timeout: int = 10, enable_bruteforce: bool = False,
                  wordlist_path: Optional[str] = None, include_subdomains: bool = True,
-                 include_external_js: bool = False):
+                 include_external_js: bool = False, crawl_depth: int = 1, max_pages: int = 50):
         """
         Args:
             base_url: 대상 웹사이트 URL
@@ -25,12 +25,16 @@ class JSCollector:
             wordlist_path: 브루트포싱에 사용할 wordlist 경로 (기본값: 내장 wordlist)
             include_subdomains: 서브도메인 포함 여부 (cdn.example.com 등)
             include_external_js: 외부 JS 파일 포함 여부 (CDN, 3rd party 등)
+            crawl_depth: 크롤링 깊이 (1=현재 페이지만, 2=링크된 페이지 포함, 3+=재귀 크롤링)
+            max_pages: 최대 크롤링 페이지 수 (무한 크롤링 방지)
         """
         self.base_url = base_url
         self.timeout = timeout
         self.enable_bruteforce = enable_bruteforce
         self.include_subdomains = include_subdomains
         self.include_external_js = include_external_js
+        self.crawl_depth = crawl_depth
+        self.max_pages = max_pages
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -38,6 +42,8 @@ class JSCollector:
         self.js_urls: Set[str] = set()
         self.js_contents: dict = {}
         self.discovered_paths: List[Dict[str, Any]] = []
+        self.visited_urls: Set[str] = set()  # 크롤링한 URL 추적
+        self.crawled_pages: int = 0  # 크롤링한 페이지 수
 
         # 디렉토리 브루트포서 초기화
         if enable_bruteforce:
@@ -45,12 +51,13 @@ class JSCollector:
         else:
             self.bruteforcer = None
 
-    def collect_from_page(self, url: str = None) -> List[str]:
+    def collect_from_page(self, url: str = None, current_depth: int = 0) -> List[str]:
         """
-        페이지에서 JavaScript 파일 URL을 수집합니다.
+        페이지에서 JavaScript 파일 URL을 수집합니다. (재귀 크롤링 지원)
 
         Args:
             url: 수집할 페이지 URL (기본값: base_url)
+            current_depth: 현재 크롤링 깊이
 
         Returns:
             수집된 JavaScript 파일 URL 리스트
@@ -58,13 +65,30 @@ class JSCollector:
         if url is None:
             url = self.base_url
 
+        # 크롤링 제한 체크
+        if current_depth >= self.crawl_depth:
+            return list(self.js_urls)
+        
+        if self.crawled_pages >= self.max_pages:
+            print(f"[!] 최대 페이지 수({self.max_pages}) 도달")
+            return list(self.js_urls)
+        
+        if url in self.visited_urls:
+            return list(self.js_urls)
+
         try:
-            print(f"[*] 페이지 크롤링: {url}")
+            print(f"[*] 페이지 크롤링 (깊이 {current_depth + 1}/{self.crawl_depth}): {url}")
+            self.visited_urls.add(url)
+            self.crawled_pages += 1
+            
             response = self.session.get(url, timeout=self.timeout, verify=False)
             response.raise_for_status()
             print(f"[+] 페이지 로드 성공 (상태 코드: {response.status_code})")
 
             soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 다음 단계에서 크롤링할 URL 수집
+            next_urls = []
 
             # <script src="..."> 태그에서 외부 JS 파일 수집
             script_tags = soup.find_all('script', src=True)
@@ -81,14 +105,26 @@ class JSCollector:
                 else:
                     print(f"[-] 다른 도메인 (건너뜀): {js_url}")
 
-            # JSP, ASP, PHP 등 서버 사이드 스크립트도 수집
-            for link in soup.find_all('a', href=True):
-                href = link['href']
-                if any(href.endswith(ext) for ext in ['.jsp', '.asp', '.aspx', '.php']):
+            # <a> 태그에서 링크 수집 (재귀 크롤링용)
+            if current_depth + 1 < self.crawl_depth:
+                for link in soup.find_all('a', href=True):
+                    href = link['href']
                     full_url = urljoin(url, href)
-                    if self._is_same_domain(full_url):
-                        self.js_urls.add(full_url)
-                        print(f"[+] 서버 스크립트 발견: {full_url}")
+                    
+                    # 같은 도메인이고 아직 방문하지 않은 HTML 페이지
+                    if self._is_same_domain(full_url) and full_url not in self.visited_urls:
+                        # 파일 확장자 체크 (HTML 페이지만)
+                        parsed = urlparse(full_url)
+                        path = parsed.path.lower()
+                        
+                        # JS, CSS, 이미지 등 제외
+                        if not any(path.endswith(ext) for ext in ['.js', '.css', '.jpg', '.png', '.gif', '.svg', '.ico', '.pdf', '.zip']):
+                            # 서버 사이드 스크립트 포함
+                            if path.endswith('.jsp') or path.endswith('.asp') or path.endswith('.aspx') or path.endswith('.php'):
+                                self.js_urls.add(full_url)
+                                print(f"[+] 서버 스크립트 발견: {full_url}")
+                            else:
+                                next_urls.append(full_url)
 
             # 인라인 스크립트에서 동적으로 로드되는 JS 파일 찾기
             for script in soup.find_all('script', src=False):
@@ -105,12 +141,21 @@ class JSCollector:
                             if self._is_same_domain(js_url):
                                 self.js_urls.add(js_url)
 
-            print(f"[+] 발견된 JS 파일: {len(self.js_urls)}개")
+            print(f"[+] 현재까지 발견된 JS 파일: {len(self.js_urls)}개")
+            
+            # 재귀 크롤링
+            if next_urls and current_depth + 1 < self.crawl_depth:
+                print(f"[*] 다음 깊이 크롤링: {len(next_urls)}개 링크")
+                for next_url in next_urls[:10]:  # 페이지당 최대 10개 링크만
+                    if self.crawled_pages >= self.max_pages:
+                        break
+                    self.collect_from_page(next_url, current_depth + 1)
+            
             return list(self.js_urls)
 
         except Exception as e:
             print(f"[!] 페이지 크롤링 실패: {e}")
-            return []
+            return list(self.js_urls)
 
     def collect_with_bruteforce(self) -> List[str]:
         """
@@ -297,5 +342,8 @@ class JSCollector:
             'js_urls': list(self.js_urls),
             'bruteforce_enabled': self.enable_bruteforce,
             'discovered_paths': len(self.discovered_paths),
-            'discovered_path_urls': self.discovered_paths
+            'discovered_path_urls': self.discovered_paths,
+            'crawl_depth': self.crawl_depth,
+            'crawled_pages': self.crawled_pages,
+            'max_pages': self.max_pages
         }

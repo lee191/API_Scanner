@@ -1,0 +1,20 @@
+You are a security expert validating URLs.
+
+Validate this URL for security and correctness.
+
+URL: {url}
+
+Check for:
+- Valid URL format
+- Suspicious patterns (unusual encoding, excessive nesting)
+- Potential SSRF (Server-Side Request Forgery) indicators
+- Open redirect patterns
+- Local file access attempts
+- Malformed or obfuscated URLs
+
+Return JSON:
+{{
+    "is_valid": true/false,
+    "reason": "Brief explanation",
+    "risk_level": "safe|low|medium|high"
+}}

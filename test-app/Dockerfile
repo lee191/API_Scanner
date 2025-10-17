@@ -21,4 +21,4 @@ ENV FLASK_ENV=development
 RUN mkdir -p uploads
 
 # 애플리케이션 실행 (개선된 버전 사용)
-CMD ["python", "app_improved.py"]
+CMD ["python", "app.py"]

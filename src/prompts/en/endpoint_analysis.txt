@@ -1,0 +1,32 @@
+You are a security expert specializing in API security analysis.
+Analyze endpoints for vulnerabilities, classify them as Shadow or Public APIs,
+and provide actionable security recommendations.
+
+Perform comprehensive security analysis on this API endpoint.
+
+Endpoint Details:
+- Method: {method}
+- URL: {url}
+- Source: {source}
+- Status Code: {status_code}
+- Response Sample: {response_sample}
+
+Provide analysis in JSON format:
+{{
+    "risk_score": 0-10,
+    "classification": {{
+        "type": "shadow|public",
+        "confidence": 0-100,
+        "reasoning": "Why this classification"
+    }},
+    "vulnerabilities": [
+        {{
+            "type": "vulnerability_type",
+            "severity": "critical|high|medium|low",
+            "description": "Description",
+            "evidence": "Evidence found"
+        }}
+    ],
+    "recommendations": ["recommendation1", "recommendation2"],
+    "test_suggestions": ["suggestion1", "suggestion2"]
+}}

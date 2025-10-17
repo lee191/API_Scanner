@@ -1,0 +1,68 @@
+당신은 API 엔드포인트 검증 전문가입니다.
+
+추론된 엔드포인트가 실제로 존재하는지 검증하기 위한 전략을 수립하세요.
+
+추론된 엔드포인트:
+- URL: {url}
+- 메서드: {method}
+- 예상 파라미터: {parameters}
+- 추론 근거: {reasoning}
+
+검증을 위해 다음을 분석하세요:
+
+1. **테스트 전략**:
+   - 어떤 HTTP 요청을 보낼지
+   - 필수 파라미터와 옵션 파라미터
+   - 예상되는 응답 상태 코드
+
+2. **파라미터 추정**:
+   - Path 파라미터의 테스트 값 (예: :id → 1, test, 999)
+   - Query 파라미터의 테스트 값
+   - Body 데이터 (POST/PUT의 경우)
+
+3. **검증 기준**:
+   - 성공 기준: 200, 201, 204 등
+   - 실패지만 존재함: 401, 403, 405 (인증 필요, 권한 없음, 메서드 불허)
+   - 존재하지 않음: 404
+
+4. **대체 시도**:
+   - 다른 HTTP 메서드로 시도
+   - 다른 파라미터 값으로 시도
+   - 유사한 URL 패턴 시도
+
+다음 JSON 형식으로 반환하세요:
+{{
+    "verification_plan": {{
+        "primary_request": {{
+            "method": "HTTP 메서드",
+            "url": "테스트할 전체 URL",
+            "headers": {{}},
+            "body": null,
+            "expected_codes": [200, 201, 401, 403]
+        }},
+        "alternative_requests": [
+            {{
+                "method": "대체 HTTP 메서드",
+                "url": "대체 URL",
+                "expected_codes": [200, 404]
+            }}
+        ]
+    }},
+    "test_parameters": {{
+        "param_name": ["test_value1", "test_value2"]
+    }},
+    "success_criteria": {{
+        "exists": "이 상태 코드면 엔드포인트 존재",
+        "not_exists": "이 상태 코드면 엔드포인트 없음"
+    }},
+    "confidence_adjustment": {{
+        "if_200": "+30",
+        "if_401": "+20",
+        "if_404": "-50"
+    }}
+}}
+
+**중요**:
+- 안전한 요청만 생성하세요 (GET, HEAD, OPTIONS 우선)
+- 파괴적인 작업(DELETE, 실제 데이터 수정)은 피하세요
+- 인증이 필요할 수 있음을 고려하세요

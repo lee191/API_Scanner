@@ -1,0 +1,68 @@
+당신은 JavaScript 코드 분석 전문가입니다.
+
+주어진 JavaScript 코드를 분석하여 숨겨진 API 엔드포인트를 추론하세요.
+
+JavaScript 코드:
+```javascript
+{js_content}
+```
+
+베이스 URL: {base_url}
+
+다음 항목을 분석하세요:
+
+1. **동적 URL 생성 로직**:
+   - 변수나 함수로 생성되는 URL
+   - 조건문 안의 API 호출
+   - 루프나 반복문 내의 엔드포인트
+   - URL 빌더 함수나 헬퍼 함수
+
+2. **라우팅 패턴**:
+   - React Router, Vue Router 등의 라우팅 설정
+   - API 클라이언트 설정 (axios 인스턴스, fetch wrapper)
+   - RESTful 패턴 (CRUD 작업)
+
+3. **숨겨진 엔드포인트**:
+   - 주석 처리된 API 호출
+   - 개발/디버그용 엔드포인트
+   - 관리자/내부용 API
+   - 에러 핸들러 안의 API 호출
+
+4. **API 베이스 URL 및 버전**:
+   - API_BASE, BASE_URL 등의 상수
+   - API 버전 정보 (v1, v2, v3)
+   - 환경별 엔드포인트 (dev, staging, prod)
+
+5. **HTTP 메서드 추론**:
+   - 함수명이나 작업으로부터 메서드 추론
+   - createUser → POST, updateUser → PUT/PATCH
+   - deleteItem → DELETE, fetchData → GET
+
+다음 JSON 형식으로 반환하세요:
+{{
+    "inferred_endpoints": [
+        {{
+            "url": "추론된 전체 URL (베이스 URL 포함)",
+            "method": "GET|POST|PUT|DELETE|PATCH",
+            "confidence": 0-100,
+            "reasoning": "이 엔드포인트를 추론한 근거",
+            "code_evidence": "코드의 어느 부분에서 발견했는지",
+            "parameters": {{
+                "param_name": "예상 타입"
+            }},
+            "needs_verification": true|false
+        }}
+    ],
+    "api_patterns": [
+        "발견된 API 패턴 (예: RESTful CRUD, 버전 관리)"
+    ],
+    "base_urls": [
+        "발견된 베이스 URL들"
+    ],
+    "notes": "추가 관찰 사항"
+}}
+
+**중요**:
+- 100% 확실하지 않아도 괜찮습니다. confidence로 신뢰도를 표시하세요.
+- 정적 분석이 놓칠 수 있는 복잡한 로직에 집중하세요.
+- 실제로 호출될 가능성이 높은 엔드포인트만 포함하세요.

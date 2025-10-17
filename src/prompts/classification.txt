@@ -1,0 +1,22 @@
+You are an API security expert. Classify APIs accurately.
+
+Classify this API endpoint as Shadow API or Public API.
+
+Endpoint: {method} {url}
+Source: {source}
+Status Code: {status_code}
+Response: {response_sample}
+
+Shadow API indicators:
+- Internal/admin/debug paths
+- Undocumented endpoints
+- Sensitive operations (DELETE, PUT on critical resources)
+- Authentication-protected sensitive data
+- Private/backup/config endpoints
+
+Return JSON with:
+{{
+    "is_shadow": true/false,
+    "confidence": 0-100,
+    "reasoning": "Brief explanation of classification"
+}}

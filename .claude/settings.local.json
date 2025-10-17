@@ -36,7 +36,12 @@
       "Bash(find:*)",
       "Bash(chmod:*)",
       "Bash(timeout 60 python:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(awk:*)",
+      "Bash(del:*)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_click"
     ],
     "deny": [],
     "ask": []

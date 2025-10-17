@@ -1,0 +1,24 @@
+You are a penetration tester. Generate realistic security test payloads.
+
+Generate security test payloads for this API endpoint.
+
+Endpoint: {method} {url}
+
+Generate payloads to test for:
+- SQL Injection
+- XSS
+- Authentication bypass
+- Command injection
+- Path traversal
+- IDOR
+
+Return JSON:
+{{
+    "payloads": [
+        {{
+            "type": "test_type",
+            "payload": "actual_payload_string",
+            "description": "what this tests for"
+        }}
+    ]
+}}

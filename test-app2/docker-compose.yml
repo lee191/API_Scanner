@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  test-app2:
+    build: .
+    container_name: test-app2-ecommerce
+    ports:
+      - "5002:5002"
+    environment:
+      - FLASK_ENV=development
+    volumes:
+      - ./:/app
+    restart: unless-stopped

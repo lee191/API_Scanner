@@ -1,0 +1,108 @@
+{
+  "target": "http://localhost:5002",
+  "total_endpoints": 15,
+  "public_endpoints": 7,
+  "shadow_endpoints": 8,
+  "endpoints": [
+    {
+      "path": "/api/v2/orders",
+      "method": "GET",
+      "type": "public",
+      "description": "주문 목록 조회",
+      "parameters": ["user_id"]
+    },
+    {
+      "path": "/api/v2/orders/<order_id>",
+      "method": "GET",
+      "type": "public",
+      "description": "주문 상세 조회"
+    },
+    {
+      "path": "/api/v2/orders",
+      "method": "POST",
+      "type": "public",
+      "description": "주문 생성"
+    },
+    {
+      "path": "/api/v2/reviews",
+      "method": "GET",
+      "type": "public",
+      "description": "리뷰 목록 조회",
+      "parameters": ["product_id"]
+    },
+    {
+      "path": "/api/v2/reviews",
+      "method": "POST",
+      "type": "public",
+      "description": "리뷰 작성"
+    },
+    {
+      "path": "/api/v2/coupons/validate",
+      "method": "POST",
+      "type": "public",
+      "description": "쿠폰 검증"
+    },
+    {
+      "path": "/",
+      "method": "GET",
+      "type": "public",
+      "description": "메인 페이지"
+    },
+    {
+      "path": "/api/internal/payments/all",
+      "method": "GET",
+      "type": "shadow",
+      "description": "모든 결제 정보 조회 (카드 정보 포함)",
+      "severity": "critical"
+    },
+    {
+      "path": "/api/internal/admin/orders",
+      "method": "GET",
+      "type": "shadow",
+      "description": "관리자용 주문 관리",
+      "severity": "high"
+    },
+    {
+      "path": "/api/internal/coupons/all",
+      "method": "GET",
+      "type": "shadow",
+      "description": "모든 쿠폰 조회 (비활성 쿠폰 포함)",
+      "severity": "medium"
+    },
+    {
+      "path": "/api/internal/admin/coupons",
+      "method": "POST",
+      "type": "shadow",
+      "description": "쿠폰 생성 (관리자 전용)",
+      "severity": "high"
+    },
+    {
+      "path": "/api/internal/shipping/config",
+      "method": "GET",
+      "type": "shadow",
+      "description": "배송 추적 시스템 정보 (API 키 포함)",
+      "severity": "critical"
+    },
+    {
+      "path": "/api/internal/payment/gateway",
+      "method": "GET",
+      "type": "shadow",
+      "description": "결제 게이트웨이 설정 (Stripe, PayPal 키 포함)",
+      "severity": "critical"
+    },
+    {
+      "path": "/api/internal/users/<user_id>/payment-history",
+      "method": "GET",
+      "type": "shadow",
+      "description": "사용자 결제 히스토리 (CVV 포함)",
+      "severity": "critical"
+    },
+    {
+      "path": "/api/internal/reports/sales",
+      "method": "GET",
+      "type": "shadow",
+      "description": "내부 통계 및 리포트",
+      "severity": "medium"
+    }
+  ]
+}

@@ -25,6 +25,11 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  headers: {
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  }
 });
 
 interface Statistics {
@@ -68,15 +73,43 @@ export default function ScanDetailPage() {
   const [expandedEndpoints, setExpandedEndpoints] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<'overview' | 'endpoints' | 'paths'>('overview');
   const [copiedCurl, setCopiedCurl] = useState<string | null>(null);
+  
+  // New filter states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterMethod, setFilterMethod] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterSource, setFilterSource] = useState<string>('all'); // all, static, ai
+  const [sortBy, setSortBy] = useState<'url' | 'method' | 'status'>('url');
 
   useEffect(() => {
     loadScanDetail();
   }, [scanId]);
 
+  // Poll scan status if it's still running
+  useEffect(() => {
+    if (!scanData || scanData.status !== 'running') {
+      return;
+    }
+
+    const pollInterval = setInterval(() => {
+      loadScanDetail();
+    }, 2000); // Poll every 2 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [scanData?.status]);
+
   const loadScanDetail = async () => {
     try {
       setLoading(true);
-      const response = await api.get(`/api/status/${scanId}`);
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const response = await api.get(`/api/status/${scanId}?_t=${timestamp}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
       setScanData(response.data);
     } catch (err: any) {
       setError(err.response?.data?.error || err.message || '스캔 정보를 불러오는데 실패했습니다');
@@ -103,6 +136,61 @@ export default function ScanDetailPage() {
     } catch (err) {
       console.error('Failed to copy:', err);
     }
+  };
+
+  // Expand/Collapse all endpoints
+  const expandAll = () => {
+    const allKeys = new Set<string>();
+    scanData?.result?.shadow_apis?.forEach((_, idx) => allKeys.add(`shadow-${idx}`));
+    scanData?.result?.public_apis?.forEach((_, idx) => allKeys.add(`public-${idx}`));
+    setExpandedEndpoints(allKeys);
+  };
+
+  const collapseAll = () => {
+    setExpandedEndpoints(new Set());
+  };
+
+  // Filter and sort endpoints
+  const filterAndSortEndpoints = (endpoints: any[], prefix: string) => {
+    if (!endpoints) return [];
+    
+    let filtered = endpoints.filter((ep) => {
+      // Search filter
+      if (searchQuery && !ep.url.toLowerCase().includes(searchQuery.toLowerCase())) {
+        return false;
+      }
+      
+      // Method filter
+      if (filterMethod !== 'all' && ep.method?.toUpperCase() !== filterMethod.toUpperCase()) {
+        return false;
+      }
+      
+      // Status filter
+      if (filterStatus !== 'all') {
+        if (filterStatus === '2xx' && (ep.status_code < 200 || ep.status_code >= 300)) return false;
+        if (filterStatus === '3xx' && (ep.status_code < 300 || ep.status_code >= 400)) return false;
+        if (filterStatus === '4xx' && (ep.status_code < 400 || ep.status_code >= 500)) return false;
+        if (filterStatus === '5xx' && (ep.status_code < 500 || ep.status_code >= 600)) return false;
+      }
+      
+      // Source filter
+      if (filterSource !== 'all') {
+        if (filterSource === 'ai' && !ep.source?.startsWith('AI:')) return false;
+        if (filterSource === 'static' && !ep.source?.startsWith('Static:')) return false;
+      }
+      
+      return true;
+    });
+
+    // Sort
+    filtered.sort((a, b) => {
+      if (sortBy === 'url') return a.url.localeCompare(b.url);
+      if (sortBy === 'method') return (a.method || '').localeCompare(b.method || '');
+      if (sortBy === 'status') return (a.status_code || 0) - (b.status_code || 0);
+      return 0;
+    });
+
+    return filtered;
   };
 
 
@@ -207,15 +295,34 @@ export default function ScanDetailPage() {
                 </div>
               </div>
 
-              <div className={`px-4 py-2 rounded-lg font-semibold ${
-                scanData.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                scanData.status === 'running' ? 'bg-yellow-500/20 text-yellow-400' :
-                scanData.status === 'failed' ? 'bg-red-500/20 text-red-400' :
-                'bg-gray-500/20 text-gray-400'
-              }`}>
-                {scanData.status === 'completed' ? '완료' :
-                 scanData.status === 'running' ? '진행중' :
-                 scanData.status === 'failed' ? '실패' : '대기중'}
+              <div className="flex flex-col items-end gap-2">
+                <div className={`px-4 py-2 rounded-lg font-semibold ${
+                  scanData.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                  scanData.status === 'running' ? 'bg-yellow-500/20 text-yellow-400' :
+                  scanData.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                  'bg-gray-500/20 text-gray-400'
+                }`}>
+                  {scanData.status === 'completed' ? '완료' :
+                   scanData.status === 'running' ? '진행중' :
+                   scanData.status === 'failed' ? '실패' : '대기중'}
+                </div>
+                {scanData.status === 'running' && (
+                  <div className="w-48">
+                    <div className="flex justify-between text-sm text-gray-400 mb-1">
+                      <span>진행률</span>
+                      <span>{scanData.progress || 0}%</span>
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-2">
+                      <div
+                        className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${scanData.progress || 0}%` }}
+                      />
+                    </div>
+                    {scanData.message && (
+                      <div className="text-xs text-gray-400 mt-1">{scanData.message}</div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -307,17 +414,148 @@ export default function ScanDetailPage() {
           {/* Endpoints Tab */}
           {activeTab === 'endpoints' && (
             <div className="space-y-4">
-              <h2 className="text-2xl font-bold text-white mb-4">
-                엔드포인트 목록
-              </h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold text-white">
+                  엔드포인트 목록
+                </h2>
+                <div className="flex gap-2">
+                  <button
+                    onClick={expandAll}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition flex items-center gap-2"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                    모두 펼치기
+                  </button>
+                  <button
+                    onClick={collapseAll}
+                    className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm font-semibold transition flex items-center gap-2"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                    모두 접기
+                  </button>
+                </div>
+              </div>
+
+              {/* Filters */}
+              <div className="bg-gray-800/50 rounded-lg p-4 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                  {/* Search */}
+                  <div className="lg:col-span-2">
+                    <label className="block text-sm font-semibold text-gray-300 mb-2">🔍 검색</label>
+                    <input
+                      type="text"
+                      placeholder="URL로 검색..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                    />
+                  </div>
+
+                  {/* Method Filter */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-300 mb-2">HTTP 메서드</label>
+                    <select
+                      value={filterMethod}
+                      onChange={(e) => setFilterMethod(e.target.value)}
+                      className="w-full px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 transition"
+                    >
+                      <option value="all">전체</option>
+                      <option value="GET">GET</option>
+                      <option value="POST">POST</option>
+                      <option value="PUT">PUT</option>
+                      <option value="DELETE">DELETE</option>
+                      <option value="PATCH">PATCH</option>
+                    </select>
+                  </div>
+
+                  {/* Status Filter */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-300 mb-2">상태 코드</label>
+                    <select
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value)}
+                      className="w-full px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 transition"
+                    >
+                      <option value="all">전체</option>
+                      <option value="2xx">2xx (성공)</option>
+                      <option value="3xx">3xx (리다이렉트)</option>
+                      <option value="4xx">4xx (클라이언트 오류)</option>
+                      <option value="5xx">5xx (서버 오류)</option>
+                    </select>
+                  </div>
+
+                  {/* Source Filter */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-300 mb-2">탐지 방법</label>
+                    <select
+                      value={filterSource}
+                      onChange={(e) => setFilterSource(e.target.value)}
+                      className="w-full px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 transition"
+                    >
+                      <option value="all">전체</option>
+                      <option value="static">정적 분석</option>
+                      <option value="ai">🤖 AI 분석</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Sort */}
+                <div className="flex items-center gap-4">
+                  <span className="text-sm font-semibold text-gray-300">정렬:</span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setSortBy('url')}
+                      className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${
+                        sortBy === 'url'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                      }`}
+                    >
+                      URL
+                    </button>
+                    <button
+                      onClick={() => setSortBy('method')}
+                      className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${
+                        sortBy === 'method'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                      }`}
+                    >
+                      메서드
+                    </button>
+                    <button
+                      onClick={() => setSortBy('status')}
+                      className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${
+                        sortBy === 'status'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                      }`}
+                    >
+                      상태 코드
+                    </button>
+                  </div>
+                </div>
+              </div>
               
               {scanData.result?.shadow_apis && scanData.result.shadow_apis.length > 0 && (
                 <div className="mb-6">
-                  <h3 className="text-xl font-bold text-red-400 mb-3">🔴 Shadow APIs ({scanData.result.shadow_apis.length})</h3>
-                  <div className="space-y-2">
-                    {scanData.result.shadow_apis.map((endpoint: any, index: number) => {
-                      const key = `shadow-${index}`;
-                      const isExpanded = expandedEndpoints.has(key);
+                  {(() => {
+                    const filteredShadow = filterAndSortEndpoints(scanData.result!.shadow_apis, 'shadow');
+                    return (
+                      <>
+                        <h3 className="text-xl font-bold text-red-400 mb-3">
+                          🔴 Shadow APIs ({filteredShadow.length}/{scanData.result!.shadow_apis.length})
+                        </h3>
+                        {filteredShadow.length === 0 ? (
+                          <div className="text-center py-8 text-gray-400">
+                            <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p>필터 조건에 맞는 Shadow API가 없습니다</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {filteredShadow.map((endpoint: any, index: number) => {
+                              const key = `shadow-${index}`;
+                              const isExpanded = expandedEndpoints.has(key);
                       return (
                         <div key={key} className="bg-red-500/20 border border-red-500/50 rounded-lg overflow-hidden">
                           <div
@@ -339,6 +577,11 @@ export default function ScanDetailPage() {
                                   'bg-blue-500/30 text-blue-300'
                                 }`}>
                                   {endpoint.status_code}
+                                </span>
+                              )}
+                              {endpoint.source && endpoint.source.startsWith('AI:') && (
+                                <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded text-xs font-semibold ml-2">
+                                  🤖 AI
                                 </span>
                               )}
                             </div>
@@ -423,7 +666,7 @@ export default function ScanDetailPage() {
                                 </div>
                               )}
                               <div className="flex items-center justify-between pt-2 border-t border-red-500/30">
-                                <div>
+                                <div className="flex items-center gap-2">
                                   <span className="text-red-300 font-semibold">Source: </span>
                                   <span className="text-red-200">{endpoint.source}</span>
                                 </div>
@@ -443,19 +686,35 @@ export default function ScanDetailPage() {
                             </div>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
 
               {scanData.result?.public_apis && scanData.result.public_apis.length > 0 && (
                 <div>
-                  <h3 className="text-xl font-bold text-green-400 mb-3">🟢 Public APIs ({scanData.result.public_apis.length})</h3>
-                  <div className="space-y-2">
-                    {scanData.result.public_apis.map((endpoint: any, index: number) => {
-                      const key = `public-${index}`;
-                      const isExpanded = expandedEndpoints.has(key);
+                  {(() => {
+                    const filteredPublic = filterAndSortEndpoints(scanData.result!.public_apis, 'public');
+                    return (
+                      <>
+                        <h3 className="text-xl font-bold text-green-400 mb-3">
+                          🟢 Public APIs ({filteredPublic.length}/{scanData.result!.public_apis.length})
+                        </h3>
+                        {filteredPublic.length === 0 ? (
+                          <div className="text-center py-8 text-gray-400">
+                            <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p>필터 조건에 맞는 Public API가 없습니다</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {filteredPublic.map((endpoint: any, index: number) => {
+                              const key = `public-${index}`;
+                              const isExpanded = expandedEndpoints.has(key);
                       return (
                         <div key={key} className="bg-green-500/20 border border-green-500/50 rounded-lg overflow-hidden">
                           <div
@@ -477,6 +736,11 @@ export default function ScanDetailPage() {
                                   'bg-blue-500/30 text-blue-300'
                                 }`}>
                                   {endpoint.status_code}
+                                </span>
+                              )}
+                              {endpoint.source && endpoint.source.startsWith('AI:') && (
+                                <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded text-xs font-semibold ml-2">
+                                  🤖 AI
                                 </span>
                               )}
                             </div>
@@ -561,9 +825,14 @@ export default function ScanDetailPage() {
                                 </div>
                               )}
                               <div className="flex items-center justify-between pt-2 border-t border-green-500/30">
-                                <div>
+                                <div className="flex items-center gap-2">
                                   <span className="text-green-300 font-semibold">Source: </span>
                                   <span className="text-green-200">{endpoint.source}</span>
+                                  {endpoint.source && endpoint.source.startsWith('AI:') && (
+                                    <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded text-xs font-semibold">
+                                      🤖 AI
+                                    </span>
+                                  )}
                                 </div>
                                 {endpoint.status_code && (
                                   <div>
@@ -582,8 +851,12 @@ export default function ScanDetailPage() {
                           )}
                         </div>
                       );
-                    })}
-                  </div>
+                            })}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
 

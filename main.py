@@ -160,8 +160,13 @@ def combine(proxy_capture, js_analysis):
 @click.option('--bruteforce/--no-bruteforce', default=False, help='디렉토리 브루트포싱 활성화')
 @click.option('--wordlist', type=click.Path(exists=True), help='브루트포싱 wordlist 경로')
 @click.option('--validate/--no-validate', default=True, help='엔드포인트 HTTP 검증 활성화')
+@click.option('--ai/--no-ai', default=False, help='AI 기반 분석 및 검증 활성화 (정적 + AI)')
+@click.option('--static-only', is_flag=True, help='정적 분석만 수행 (AI 비활성화)')
+@click.option('--ai-only', is_flag=True, help='AI 분석만 수행 (정적 분석 비활성화)')
+@click.option('--crawl-depth', default=1, type=int, help='크롤링 깊이 (1=현재 페이지만, 2+=재귀 크롤링)')
+@click.option('--max-pages', default=50, type=int, help='최대 크롤링 페이지 수')
 @click.option('--output', default='output', help='출력 디렉토리')
-def full_scan(target, js_path, bruteforce, wordlist, validate, output):
+def full_scan(target, js_path, bruteforce, wordlist, validate, ai, static_only, ai_only, crawl_depth, max_pages, output):
     """전체 스캔 수행 (JS 분석 + 리포트)"""
     print(f"{Fore.GREEN}[*] 전체 스캔 시작: {target}{Style.RESET_ALL}\n")
 
@@ -194,7 +199,15 @@ def full_scan(target, js_path, bruteforce, wordlist, validate, output):
         print(f"[*] 웹사이트에서 자동 수집: {target}")
         if bruteforce:
             print(f"{Fore.YELLOW}[*] 디렉토리 브루트포싱 활성화됨{Style.RESET_ALL}")
-        js_collector = JSCollector(target, enable_bruteforce=bruteforce, wordlist_path=wordlist)
+        print(f"{Fore.CYAN}[*] 크롤링 깊이: {crawl_depth}, 최대 페이지: {max_pages}{Style.RESET_ALL}")
+        
+        js_collector = JSCollector(
+            target, 
+            enable_bruteforce=bruteforce, 
+            wordlist_path=wordlist,
+            crawl_depth=crawl_depth,
+            max_pages=max_pages
+        )
 
         # 브루트포싱이 활성화되면 collect_with_bruteforce 사용
         if bruteforce:
@@ -205,24 +218,34 @@ def full_scan(target, js_path, bruteforce, wordlist, validate, output):
         downloaded_files = js_collector.download_js_files(str(temp_js_dir))
         files = [Path(f) for f in downloaded_files]
 
+        # 통계 출력
+        stats = js_collector.get_statistics()
+        print(f"{Fore.GREEN}  [OK] 크롤링한 페이지: {stats['crawled_pages']}개{Style.RESET_ALL}")
+        
         # 브루트포싱 통계 출력 및 발견된 경로 저장
         if bruteforce:
-            stats = js_collector.get_statistics()
             scan_result.discovered_paths = js_collector.discovered_paths
             print(f"{Fore.GREEN}  [OK] 발견된 경로: {stats['discovered_paths']}개{Style.RESET_ALL}")
-            print(f"{Fore.GREEN}  [OK] 수집된 JS 파일: {stats['total_js_files']}개{Style.RESET_ALL}\n")
+        
+        print(f"{Fore.GREEN}  [OK] 수집된 JS 파일: {stats['total_js_files']}개{Style.RESET_ALL}\n")
 
     if files:
         print(f"{Fore.GREEN}  [OK] 수집된 JS 파일: {len(files)}개{Style.RESET_ALL}\n")
 
-        print(f"{Fore.CYAN}[2/3] JavaScript 분석 중...{Style.RESET_ALL}")
-        analyzer = JSAnalyzer()
+        # 정적 분석 (ai_only가 아닌 경우에만)
+        if not ai_only:
+            print(f"{Fore.CYAN}[2/3] JavaScript 정적 분석 중...{Style.RESET_ALL}")
+            analyzer = JSAnalyzer()
 
-        for file in tqdm(files, desc="파일 분석"):
-            endpoints = analyzer.analyze_file(str(file), target)
-            collector.add_endpoints(endpoints)
+            for file in tqdm(files, desc="파일 분석"):
+                endpoints = analyzer.analyze_file(str(file), target)
+                # Mark as static analysis
+                for ep in endpoints:
+                    if not ep.source.startswith('AI'):
+                        ep.source = f"Static:{ep.source}"
+                collector.add_endpoints(endpoints)
 
-        print(f"{Fore.GREEN}  [OK] 발견된 엔드포인트: {len(collector.get_endpoints())}개{Style.RESET_ALL}\n")
+            print(f"{Fore.GREEN}  [OK] 발견된 엔드포인트: {len(collector.get_endpoints())}개{Style.RESET_ALL}\n")
     else:
         print(f"{Fore.YELLOW}  [!] JavaScript 파일을 찾을 수 없습니다{Style.RESET_ALL}\n")
 
@@ -230,7 +253,8 @@ def full_scan(target, js_path, bruteforce, wordlist, validate, output):
     all_endpoints = collector.get_endpoints()
 
     if validate and all_endpoints:
-        print(f"{Fore.CYAN}[2.5/3] 엔드포인트 검증 중...{Style.RESET_ALL}")
+        validation_step = "[2.5/4]" if ai else "[2.5/3]"
+        print(f"{Fore.CYAN}{validation_step} 엔드포인트 검증 중...{Style.RESET_ALL}")
         from src.utils.endpoint_validator import EndpointValidator
 
         validator = EndpointValidator(timeout=5)
@@ -258,6 +282,64 @@ def full_scan(target, js_path, bruteforce, wordlist, validate, output):
         print(f"{Fore.GREEN}    - 유효한 엔드포인트: {valid_count}개 ({valid_count*100//(valid_count+invalid_count) if (valid_count+invalid_count) > 0 else 0}%){Style.RESET_ALL}")
         print(f"{Fore.YELLOW}    - 무효한 엔드포인트 (False Positive): {invalid_count}개 ({invalid_count*100//(valid_count+invalid_count) if (valid_count+invalid_count) > 0 else 0}%){Style.RESET_ALL}\n")
 
+    # AI Analysis (if enabled or ai_only)
+    if (ai or ai_only) and files and not static_only:
+        print(f"{Fore.CYAN}[3/4] AI 기반 엔드포인트 추론 중...{Style.RESET_ALL}")
+        ai_model = os.getenv('AI_MODEL', 'gpt-4o')
+        print(f"{Fore.YELLOW}  [AI] {ai_model}를 사용하여 숨겨진 엔드포인트 추론{Style.RESET_ALL}")
+
+        try:
+            from src.analyzer.ai_analyzer import analyze_js_with_ai
+
+            # Convert Path objects to strings
+            js_file_paths = [str(f) for f in files]
+
+            # AI analyzes JS files and infers hidden endpoints
+            ai_endpoints = analyze_js_with_ai(js_file_paths, target)
+
+            if ai_endpoints:
+                print(f"{Fore.GREEN}  [OK] AI 추론 완료{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}    - AI가 추론하고 검증한 엔드포인트: {len(ai_endpoints)}개{Style.RESET_ALL}")
+
+                # Get existing static endpoints for comparison
+                existing_endpoints = collector.get_endpoints()
+                existing_urls = {ep.url for ep in existing_endpoints}
+
+                # Mark AI endpoints with AI prefix only if not found in static analysis
+                ai_only_count = 0
+                both_found_count = 0
+                for ep in ai_endpoints:
+                    if ep.url in existing_urls:
+                        # Found in both static and AI - keep as Static only (no AI badge)
+                        both_found_count += 1
+                        # Don't add AI prefix
+                    else:
+                        # AI only - mark with AI prefix
+                        ai_only_count += 1
+                        if not ep.source.startswith('AI'):
+                            ep.source = f"AI:{ep.source}"
+
+                # Add AI-inferred endpoints to collector
+                collector.add_endpoints(ai_endpoints)
+                
+                if both_found_count > 0:
+                    print(f"{Fore.GREEN}    - 정적 분석과 일치: {both_found_count}개 (AI 배지 제외){Style.RESET_ALL}")
+                if ai_only_count > 0:
+                    print(f"{Fore.MAGENTA}    - AI만 발견: {ai_only_count}개 (AI 배지 표시){Style.RESET_ALL}")
+
+                # Update all_endpoints to include AI-inferred ones
+                all_endpoints = collector.get_endpoints()
+
+                if ai_only:
+                    print(f"{Fore.CYAN}    - AI 분석 엔드포인트: {len(all_endpoints)}개{Style.RESET_ALL}\n")
+                else:
+                    print(f"{Fore.CYAN}    - 총 엔드포인트 (정적 분석 + AI 추론): {len(all_endpoints)}개{Style.RESET_ALL}\n")
+            else:
+                print(f"{Fore.YELLOW}  [!] AI가 추가 엔드포인트를 발견하지 못했습니다{Style.RESET_ALL}\n")
+
+        except Exception as e:
+            print(f"{Fore.YELLOW}  [!] AI 분석 실패: {e}{Style.RESET_ALL}\n")
+
     # Add endpoints to result
     scan_result.endpoints = all_endpoints
     scan_result.finalize()
@@ -279,8 +361,8 @@ def full_scan(target, js_path, bruteforce, wordlist, validate, output):
                 scan_id=scan_id,
                 target_url=target,
                 js_path=js_path,
-                scan_vulns=False,
-                ai_enabled=False,
+                scan_vulns=ai,
+                ai_enabled=ai,
                 bruteforce_enabled=bruteforce,
                 analysis_type='full_scan'
             )
@@ -297,7 +379,8 @@ def full_scan(target, js_path, bruteforce, wordlist, validate, output):
         print(f"{Fore.YELLOW}  [!] 데이터베이스 저장 실패: {e}{Style.RESET_ALL}")
 
     # Generate reports
-    print(f"{Fore.CYAN}[3/3] 리포트 생성 중...{Style.RESET_ALL}")
+    report_step = "[4/4]" if ai else "[3/3]"
+    print(f"{Fore.CYAN}{report_step} 리포트 생성 중...{Style.RESET_ALL}")
     reporter = ReportGenerator(output_dir=output)
     reports = reporter.generate_all(scan_result, prefix="full_scan")
 

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import ScanTab from '@/components/ScanTab';
 
 // API Base URL 설정
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
@@ -19,6 +20,11 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
+  headers: {
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  }
 });
 
 // 색상 팔레트
@@ -39,7 +45,10 @@ export default function ImprovedHome() {
   const [targetUrl, setTargetUrl] = useState('');
   const [jsPath, setJsPath] = useState('');
   const [bruteforceEnabled, setBruteforceEnabled] = useState(false);
+  const [analysisMode, setAnalysisMode] = useState<'static' | 'ai' | 'both'>('both');
   const [analysisType, setAnalysisType] = useState<'js_only' | 'full_scan'>('full_scan');
+  const [crawlDepth, setCrawlDepth] = useState(1);  // 크롤링 깊이
+  const [maxPages, setMaxPages] = useState(50);  // 최대 페이지 수
   const [scanning, setScanning] = useState(false);
   const [scanId, setScanId] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
@@ -60,6 +69,7 @@ export default function ImprovedHome() {
   const [activeTab, setActiveTab] = useState<'scan' | 'dashboard' | 'history' | 'projects'>('projects');
   const [expandedEndpoints, setExpandedEndpoints] = useState<Set<string>>(new Set());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [scanSubTab, setScanSubTab] = useState<'settings' | 'progress' | 'help'>('settings');
 
   // 대시보드 상태
   const [dashStats, setDashStats] = useState<any>(null);
@@ -432,10 +442,15 @@ export default function ImprovedHome() {
         target_url: targetUrl,
         js_path: jsPath || undefined,
         project_id: selectedProject,
-        scan_vulns: false,
-        ai_enabled: false,
+        scan_vulns: analysisMode !== 'static',
+        ai_enabled: analysisMode === 'ai' || analysisMode === 'both',
+        static_only: analysisMode === 'static',
+        ai_only: analysisMode === 'ai',
         bruteforce_enabled: bruteforceEnabled,
-        analysis_type: analysisType
+        analysis_type: analysisType,
+        analysis_mode: analysisMode,
+        crawl_depth: crawlDepth,
+        max_pages: maxPages
       });
 
       const { scan_id } = response.data;
@@ -491,7 +506,15 @@ export default function ImprovedHome() {
       }
 
       try {
-        const response = await axios.get(`/api/status/${id}`);
+        // Add timestamp to prevent caching
+        const timestamp = new Date().getTime();
+        const response = await axios.get(`/api/status/${id}?_t=${timestamp}`, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        });
         const status = response.data;
 
         setProgress(status.progress || 0);
@@ -696,7 +719,7 @@ export default function ImprovedHome() {
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-white mb-2">
               {activeTab === 'projects' && '프로젝트 관리'}
-              {activeTab === 'scan' && '보안 스캔'}
+              {activeTab === 'scan' && 'Endpoint 스캔'}
               {activeTab === 'dashboard' && '분석 대시보드'}
               {activeTab === 'history' && '스캔 히스토리'}
             </h1>
@@ -829,261 +852,32 @@ export default function ImprovedHome() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Left Column - Scan Configuration */}
-                <div className="lg:col-span-2 space-y-6">
-                  {/* Selected Project Info */}
-                  <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 border border-blue-500/50 rounded-xl p-5 backdrop-blur-lg">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="p-3 bg-blue-500/30 rounded-lg">
-                          <Folder className="w-6 h-6 text-blue-300" />
-                        </div>
-                        <div>
-                          <p className="text-sm text-blue-200">현재 프로젝트</p>
-                          <p className="text-lg font-bold text-white">
-                            {projects.find(p => p.project_id === selectedProject)?.name}
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setActiveTab('projects')}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm transition"
-                      >
-                        변경
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Scan Configuration Card */}
-                  <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
-                    <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                      <Settings className="w-6 h-6 text-blue-400" />
-                      스캔 설정
-                    </h3>
-                    
-                    <div className="space-y-5">
-                      {/* Target URL */}
-                      <div>
-                        <label className="block text-white mb-2 font-semibold text-sm flex items-center gap-2">
-                          <Globe className="w-4 h-4 text-blue-400" />
-                          대상 URL *
-                        </label>
-                        <input
-                          type="text"
-                          value={targetUrl}
-                          onChange={(e) => setTargetUrl(e.target.value)}
-                          placeholder="http://localhost:5000"
-                          className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-gray-400 border border-white/30 focus:outline-none focus:border-blue-400 transition"
-                        />
-                      </div>
-
-                      {/* JavaScript Path */}
-                      <div>
-                        <label className="block text-white mb-2 font-semibold text-sm flex items-center gap-2">
-                          <FileCode className="w-4 h-4 text-purple-400" />
-                          JavaScript 경로 (선택사항)
-                        </label>
-                        <input
-                          type="text"
-                          value={jsPath}
-                          onChange={(e) => setJsPath(e.target.value)}
-                          placeholder="비워두면 자동으로 수집합니다"
-                          className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-gray-400 border border-white/30 focus:outline-none focus:border-purple-400 transition"
-                        />
-                      </div>
-
-                      {/* Analysis Type */}
-                      <div>
-                        <label className="block text-white mb-3 font-semibold text-sm">분석 타입</label>
-                        <div className="grid grid-cols-2 gap-3">
-                          <button
-                            onClick={() => setAnalysisType('js_only')}
-                            className={`p-4 rounded-lg font-semibold transition border-2 ${
-                              analysisType === 'js_only' 
-                                ? 'bg-purple-500/30 border-purple-500 text-white' 
-                                : 'bg-white/10 border-white/20 text-gray-300 hover:bg-white/20'
-                            }`}
-                          >
-                            <FileCode className="w-6 h-6 mx-auto mb-2" />
-                            <div className="text-sm">JS 분석만</div>
-                          </button>
-                          <button
-                            onClick={() => setAnalysisType('full_scan')}
-                            className={`p-4 rounded-lg font-semibold transition border-2 ${
-                              analysisType === 'full_scan' 
-                                ? 'bg-blue-500/30 border-blue-500 text-white' 
-                                : 'bg-white/10 border-white/20 text-gray-300 hover:bg-white/20'
-                            }`}
-                          >
-                            <Search className="w-6 h-6 mx-auto mb-2" />
-                            <div className="text-sm">전체 스캔</div>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Options */}
-                      {analysisType === 'full_scan' && (
-                        <div className="space-y-3 bg-blue-500/10 rounded-lg p-4 border border-blue-500/30">
-                          <div className="text-sm font-semibold text-blue-300 mb-3">스캔 옵션</div>
-
-                          <label className="flex items-center gap-3 p-3 bg-white/10 rounded-lg hover:bg-white/20 transition cursor-pointer">
-                            <input
-                              type="checkbox"
-                              id="bruteforceEnabled"
-                              checked={bruteforceEnabled}
-                              onChange={(e) => setBruteforceEnabled(e.target.checked)}
-                              className="w-5 h-5 rounded accent-green-500"
-                            />
-                            <div className="flex-1">
-                              <div className="text-white font-semibold">🔍 디렉토리 브루트포싱</div>
-                              <div className="text-xs text-gray-400">숨겨진 경로와 JS 파일을 탐색합니다</div>
-                            </div>
-                          </label>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Start Button */}
-                  <button
-                    onClick={startScan}
-                    disabled={scanning || !selectedProject || !targetUrl}
-                    className="w-full py-5 px-6 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold rounded-xl transition text-lg shadow-lg flex items-center justify-center gap-3"
-                  >
-                    {scanning ? (
-                      <>
-                        <Loader2 className="w-6 h-6 animate-spin" />
-                        <span>스캔 진행 중...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-6 h-6" />
-                        <span>스캔 시작</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Right Column - Info & Progress */}
-                <div className="space-y-6">
-                  {/* Quick Info Card */}
-                  <div className="bg-gradient-to-br from-purple-500/20 to-pink-500/20 backdrop-blur-lg rounded-xl p-6 border border-purple-500/30">
-                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                      <Info className="w-5 h-5 text-purple-400" />
-                      스캔 안내
-                    </h3>
-                    <div className="space-y-3 text-sm">
-                      <div className="flex items-start gap-2">
-                        <div className="w-6 h-6 rounded-full bg-blue-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-blue-300 font-bold text-xs">1</span>
-                        </div>
-                        <div>
-                          <div className="text-white font-semibold">대상 URL 입력</div>
-                          <div className="text-gray-400 text-xs mt-0.5">스캔할 웹 애플리케이션의 URL</div>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <div className="w-6 h-6 rounded-full bg-purple-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-purple-300 font-bold text-xs">2</span>
-                        </div>
-                        <div>
-                          <div className="text-white font-semibold">분석 타입 선택</div>
-                          <div className="text-gray-400 text-xs mt-0.5">JS만 또는 전체 스캔 선택</div>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <div className="w-6 h-6 rounded-full bg-pink-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-pink-300 font-bold text-xs">3</span>
-                        </div>
-                        <div>
-                          <div className="text-white font-semibold">옵션 설정</div>
-                          <div className="text-gray-400 text-xs mt-0.5">필요한 기능을 활성화</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Progress Card */}
-                  {scanning && (
-                    <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20 animate-pulse-subtle">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                          <Activity className="w-5 h-5 text-blue-400" />
-                          진행 상황
-                        </h3>
-                        <span className="text-2xl font-bold text-blue-400">{progress}%</span>
-                      </div>
-                      
-                      <div className="mb-4">
-                        <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
-                          <div
-                            className="bg-gradient-to-r from-blue-500 to-purple-500 h-3 rounded-full transition-all duration-500 ease-out"
-                            style={{ width: `${progress}%` }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      <div className="text-sm text-gray-300 mb-4 flex items-center gap-2">
-                        <div className="w-2 h-2 bg-blue-400 rounded-full animate-ping"></div>
-                        {statusMessage}
-                      </div>
-
-                      {scanId && (
-                        <div className="text-xs text-gray-500 mb-4 font-mono bg-black/30 p-2 rounded">
-                          ID: {scanId}
-                        </div>
-                      )}
-
-                      <button
-                        onClick={stopScan}
-                        className="w-full px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold flex items-center justify-center gap-2 transition"
-                      >
-                        <StopCircle className="w-5 h-5" />
-                        스캔 중지
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Error Card */}
-                  {error && (
-                    <div className="bg-red-500/20 backdrop-blur-lg border border-red-500 rounded-xl p-6">
-                      <div className="flex items-start gap-3">
-                        <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
-                        <div>
-                          <div className="text-red-300 font-semibold mb-1">오류 발생</div>
-                          <div className="text-red-200 text-sm">{error}</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Features Info */}
-                  {!scanning && !error && (
-                    <div className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10">
-                      <h4 className="text-sm font-bold text-white mb-3">주요 기능</h4>
-                      <div className="space-y-2 text-xs text-gray-400">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="w-4 h-4 text-green-400" />
-                          <span>Shadow API 자동 탐지</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="w-4 h-4 text-green-400" />
-                          <span>취약점 자동 스캔</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="w-4 h-4 text-green-400" />
-                          <span>AI 기반 PoC 생성</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="w-4 h-4 text-green-400" />
-                          <span>상세 리포트 제공</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <ScanTab
+                selectedProject={selectedProject}
+                projects={projects}
+                setActiveTab={setActiveTab}
+                targetUrl={targetUrl}
+                setTargetUrl={setTargetUrl}
+                jsPath={jsPath}
+                setJsPath={setJsPath}
+                analysisType={analysisType}
+                setAnalysisType={setAnalysisType}
+                analysisMode={analysisMode}
+                setAnalysisMode={setAnalysisMode}
+                bruteforceEnabled={bruteforceEnabled}
+                setBruteforceEnabled={setBruteforceEnabled}
+                crawlDepth={crawlDepth}
+                setCrawlDepth={setCrawlDepth}
+                maxPages={maxPages}
+                setMaxPages={setMaxPages}
+                scanning={scanning}
+                startScan={startScan}
+                stopScan={stopScan}
+                progress={progress}
+                statusMessage={statusMessage}
+                scanId={scanId}
+                error={error}
+              />
             )}
 
             
@@ -1287,6 +1081,11 @@ export default function ImprovedHome() {
                                     {endpoint.method}
                                   </span>
                                   <code className="flex-1 text-red-200 font-semibold">{endpoint.url}</code>
+                                  {(endpoint.source && endpoint.source.startsWith('AI')) && (
+                                    <span className="px-2 py-1 bg-purple-500/30 text-purple-200 text-xs font-bold rounded border border-purple-400">
+                                      🤖 AI
+                                    </span>
+                                  )}
                                   <span className="px-2 py-1 bg-red-600 text-white text-xs rounded">SHADOW</span>
                                 </div>
 
@@ -1384,6 +1183,11 @@ export default function ImprovedHome() {
                                     {endpoint.method}
                                   </span>
                                   <code className="flex-1 text-green-200 font-semibold">{endpoint.url}</code>
+                                  {(endpoint.source && endpoint.source.startsWith('AI')) && (
+                                    <span className="px-2 py-1 bg-purple-500/30 text-purple-200 text-xs font-bold rounded border border-purple-400">
+                                      🤖 AI
+                                    </span>
+                                  )}
                                   <span className="px-2 py-1 bg-green-600 text-white text-xs rounded">PUBLIC</span>
                                 </div>
 
@@ -1650,42 +1454,49 @@ export default function ImprovedHome() {
 
                   {/* 차트 그리드 */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* 취약점 심각도 분포 */}
+                    {/* 발견된 API 목록 */}
                     <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 border border-white/10">
                       <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                        <PieChart className="w-5 h-5 text-orange-400" />
-                        취약점 심각도 분포
+                        <Target className="w-5 h-5 text-blue-400" />
+                        발견된 API 목록
                       </h3>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <PieChart>
-                          <Pie
-                            data={[
-                              { name: 'Critical', value: vulnerabilities.by_severity.critical, color: '#ef4444' },
-                              { name: 'High', value: vulnerabilities.by_severity.high, color: '#f97316' },
-                              { name: 'Medium', value: vulnerabilities.by_severity.medium, color: '#eab308' },
-                              { name: 'Low', value: vulnerabilities.by_severity.low, color: '#3b82f6' },
-                              { name: 'Info', value: vulnerabilities.by_severity.info, color: '#6b7280' }
-                            ].filter(d => d.value > 0)}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={false}
-                            label={(entry: any) => `${entry.name}: ${entry.value}`}
-                            outerRadius={100}
-                            dataKey="value"
-                          >
-                            {[
-                              { name: 'Critical', value: vulnerabilities.by_severity.critical, color: '#ef4444' },
-                              { name: 'High', value: vulnerabilities.by_severity.high, color: '#f97316' },
-                              { name: 'Medium', value: vulnerabilities.by_severity.medium, color: '#eab308' },
-                              { name: 'Low', value: vulnerabilities.by_severity.low, color: '#3b82f6' },
-                              { name: 'Info', value: vulnerabilities.by_severity.info, color: '#6b7280' }
-                            ].filter(d => d.value > 0).map((entry: any, index: number) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
-                            ))}
-                          </Pie>
-                          <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px' }} />
-                        </PieChart>
-                      </ResponsiveContainer>
+                      <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                        <div className="flex items-center justify-between mb-3 pb-3 border-b border-white/10">
+                          <div className="flex items-center gap-4">
+                            <span className="text-sm font-semibold text-red-400">
+                              Shadow: {overview.shadow_apis}
+                            </span>
+                            <span className="text-sm font-semibold text-green-400">
+                              Public: {overview.public_apis}
+                            </span>
+                          </div>
+                          <span className="text-sm text-gray-400">
+                            Total: {overview.total_endpoints}
+                          </span>
+                        </div>
+                        {endpoints.by_method && Object.entries(endpoints.by_method).map(([method, count]) => (
+                          <div key={method} className="flex items-center justify-between p-3 bg-white/5 rounded-lg hover:bg-white/10 transition">
+                            <div className="flex items-center gap-3">
+                              <span className={`px-3 py-1 rounded font-semibold text-xs ${
+                                method === 'GET' ? 'bg-blue-500/20 text-blue-300' :
+                                method === 'POST' ? 'bg-green-500/20 text-green-300' :
+                                method === 'PUT' ? 'bg-yellow-500/20 text-yellow-300' :
+                                method === 'DELETE' ? 'bg-red-500/20 text-red-300' :
+                                'bg-gray-500/20 text-gray-300'
+                              }`}>
+                                {method}
+                              </span>
+                              <span className="text-gray-300 text-sm">엔드포인트</span>
+                            </div>
+                            <span className="text-white font-bold text-lg">{count as number}</span>
+                          </div>
+                        ))}
+                        {(!endpoints.by_method || Object.keys(endpoints.by_method).length === 0) && (
+                          <div className="text-center py-8 text-gray-400">
+                            발견된 API가 없습니다
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* HTTP 메서드 분포 */}

@@ -17,6 +17,7 @@ class EndpointValidator:
         """
         self.timeout = timeout
         self.session = requests.Session()
+
         # Disable SSL warnings for testing
         requests.packages.urllib3.disable_warnings()
 

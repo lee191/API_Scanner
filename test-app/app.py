@@ -8,11 +8,10 @@ from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 import sqlite3
 import json
-import time
 
 app = Flask(__name__)
 
-# 취약점 1: CORS 설정 문제
+# CORS 설정
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 # 인메모리 데이터베이스
@@ -42,6 +41,8 @@ def init_db():
     cursor.execute("INSERT INTO users VALUES (2, 'user', 'password', 'user@test.com', 'sk_test_def456')")
     cursor.execute("INSERT INTO products VALUES (1, 'Laptop', 999.99, 'High performance laptop')")
     cursor.execute("INSERT INTO products VALUES (2, 'Mouse', 29.99, 'Wireless mouse')")
+    cursor.execute("INSERT INTO products VALUES (3, 'Keyboard', 79.99, 'Mechanical keyboard')")
+    cursor.execute("INSERT INTO products VALUES (4, 'Monitor', 299.99, '27-inch 4K monitor')")
 
     conn.commit()
     return conn
@@ -57,6 +58,9 @@ def index():
 <html>
 <head>
     <title>Vulnerable Test App</title>
+    <!-- 모든 JavaScript 파일 로드 -->
+    <script src="/static/main.js"></script>
+    <script src="/static/auth.js"></script>
     <script src="/static/app.js"></script>
 </head>
 <body>
@@ -80,7 +84,17 @@ def index():
     ''')
 
 
-# 취약점 2: 인증 없는 API 엔드포인트
+# Public API: 제품 목록
+@app.route('/api/v1/products', methods=['GET'])
+def get_products():
+    cursor = db_conn.cursor()
+    cursor.execute("SELECT * FROM products")
+    products = [{'id': row[0], 'name': row[1], 'price': row[2], 'description': row[3]}
+                for row in cursor.fetchall()]
+    return jsonify(products)
+
+
+# Public API: 사용자 목록 (인증 없음)
 @app.route('/api/v1/users', methods=['GET'])
 def get_users():
     cursor = db_conn.cursor()
@@ -89,7 +103,7 @@ def get_users():
     return jsonify(users)
 
 
-# 취약점 3: SQL Injection 취약점
+# Public API: 사용자 상세 (SQL Injection 취약점)
 @app.route('/api/v1/user/<user_id>', methods=['GET'])
 def get_user(user_id):
     cursor = db_conn.cursor()
@@ -112,32 +126,12 @@ def get_user(user_id):
         return jsonify({'error': str(e)}), 500
 
 
-# 취약점 4: XSS 취약점
-@app.route('/api/v1/search', methods=['GET'])
-def search():
-    query = request.args.get('q', '')
-    # 의도적인 XSS 취약점 - 입력 검증 없음
-    return jsonify({
-        'query': query,
-        'results': f'<div>검색 결과: {query}</div>'
-    })
-
-
-# 취약점 5: Rate Limiting 없음
-@app.route('/api/v1/products', methods=['GET'])
-def get_products():
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT * FROM products")
-    products = [{'id': row[0], 'name': row[1], 'price': row[2], 'description': row[3]}
-                for row in cursor.fetchall()]
-    return jsonify(products)
-
-
-# 취약점 6: 민감한 정보가 URL에 포함
+# Public API: 로그인
 @app.route('/api/v1/auth/login', methods=['POST'])
 def login():
-    username = request.args.get('username')  # 취약점: URL에 username
-    password = request.args.get('password')  # 취약점: URL에 password
+    data = request.get_json() or {}
+    username = data.get('username', '')
+    password = data.get('password', '')
 
     cursor = db_conn.cursor()
     cursor.execute(f"SELECT * FROM users WHERE username='{username}' AND password='{password}'")
@@ -146,30 +140,15 @@ def login():
     if user:
         return jsonify({
             'success': True,
-            'token': 'fake_jwt_token_12345',  # 취약점: 안전하지 않은 토큰
-            'api_key': user[4]  # 취약점: API 키 노출
+            'token': 'fake_jwt_token_12345',
+            'api_key': user[4]
         })
     return jsonify({'success': False}), 401
 
 
-# 취약점 7: HTTP를 통한 인증 (HTTPS 없음)
-@app.route('/api/v1/secure/data', methods=['GET'])
-def secure_data():
-    auth_header = request.headers.get('Authorization')
-    # 취약점: 약한 인증 체크
-    if auth_header and 'Bearer' in auth_header:
-        return jsonify({
-            'secret': 'This is confidential data',
-            'credit_card': '4532-1234-5678-9010',  # 취약점: 민감 데이터 노출
-            'ssn': '123-45-6789'
-        })
-    return jsonify({'error': 'Unauthorized'}), 401
-
-
-# 숨겨진 API 엔드포인트 (Shadow API)
+# Shadow API: 관리자용 사용자 목록 (비밀번호 포함)
 @app.route('/api/internal/admin/users', methods=['GET'])
 def admin_users():
-    # 문서화되지 않은 내부 API
     cursor = db_conn.cursor()
     cursor.execute("SELECT * FROM users")
     users = [{'id': row[0], 'username': row[1], 'password': row[2],
@@ -177,9 +156,9 @@ def admin_users():
     return jsonify(users)
 
 
+# Shadow API: 디버그 설정 정보
 @app.route('/api/internal/debug/config', methods=['GET'])
 def debug_config():
-    # 취약점: 디버그 정보 노출
     return jsonify({
         'database': 'sqlite:///production.db',
         'secret_key': 'super_secret_key_123',
@@ -191,179 +170,163 @@ def debug_config():
     })
 
 
-# 브루트포싱 테스트용 숨겨진 페이지들
-@app.route('/admin')
-def admin_page():
-    """브루트포싱으로 발견 가능한 관리자 페이지"""
-    return render_template_string('''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Admin Panel</title>
-    <script src="/static/admin.js"></script>
-    <script src="/static/admin-dashboard.js"></script>
-</head>
-<body>
-    <h1>🔐 Admin Panel</h1>
-    <p>관리자 전용 페이지 - 브루트포싱으로 발견됨!</p>
-    <div id="admin-content"></div>
-    <script>
-        // 관리자 API 호출
-        fetch('/api/internal/admin/users')
-            .then(r => r.json())
-            .then(data => console.log('Admin users:', data));
-    </script>
-</body>
-</html>
-    ''')
+# ========== 새로 추가된 엔드포인트 (5개) ==========
+
+# Public API: 제품 상세 조회
+@app.route('/api/v1/products/<product_id>', methods=['GET'])
+def get_product_detail(product_id):
+    cursor = db_conn.cursor()
+    # 의도적인 SQL Injection 취약점
+    query = f"SELECT * FROM products WHERE id = {product_id}"
+    try:
+        cursor.execute(query)
+        row = cursor.fetchone()
+        if row:
+            return jsonify({
+                'id': row[0],
+                'name': row[1],
+                'price': row[2],
+                'description': row[3],
+                'stock': 100  # 고정값
+            })
+        return jsonify({'error': 'Product not found'}), 404
+    except Exception as e:
+        # 취약점: SQL 에러 메시지 노출
+        return jsonify({'error': str(e)}), 500
 
 
-@app.route('/internal')
-def internal_page():
-    """브루트포싱으로 발견 가능한 내부 페이지"""
-    return render_template_string('''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Internal Dashboard</title>
-    <script src="/static/internal-api.js"></script>
-    <script src="/static/internal-utils.js"></script>
-</head>
-<body>
-    <h1>🏢 Internal Dashboard</h1>
-    <p>내부 직원 전용 페이지</p>
-    <div id="internal-stats"></div>
-    <script>
-        // 내부 API 호출
-        fetch('/api/internal/stats')
-            .then(r => r.json())
-            .then(data => console.log('Internal stats:', data));
-    </script>
-</body>
-</html>
-    ''')
+# Public API: 제품 생성
+@app.route('/api/v1/products', methods=['POST'])
+def create_product():
+    data = request.get_json() or {}
+    name = data.get('name', '')
+    price = data.get('price', 0)
+    description = data.get('description', '')
+
+    # 입력 검증 없음 (취약점)
+    cursor = db_conn.cursor()
+
+    try:
+        # 의도적인 SQL Injection 취약점
+        query = f"INSERT INTO products (name, price, description) VALUES ('{name}', {price}, '{description}')"
+        cursor.execute(query)
+        db_conn.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Product created',
+            'product': {'name': name, 'price': price, 'description': description}
+        }), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
-@app.route('/debug')
-def debug_page():
-    """브루트포싱으로 발견 가능한 디버그 페이지"""
-    return render_template_string('''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Debug Console</title>
-    <script src="/static/debug-console.js"></script>
-    <script src="/static/debug-logger.js"></script>
-</head>
-<body>
-    <h1>🐛 Debug Console</h1>
-    <p>개발자 디버그 콘솔</p>
-    <div id="debug-output"></div>
-    <script>
-        // 디버그 API 호출
-        fetch('/api/internal/debug/config')
-            .then(r => r.json())
-            .then(data => {
-                console.log('Debug config:', data);
-                document.getElementById('debug-output').innerHTML =
-                    '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-            });
-    </script>
-</body>
-</html>
-    ''')
+# Public API: 사용자 프로필 조회
+@app.route('/api/v1/user/<user_id>/profile', methods=['GET'])
+def get_user_profile(user_id):
+    cursor = db_conn.cursor()
+    # 의도적인 SQL Injection 취약점
+    query = f"SELECT * FROM users WHERE id = {user_id}"
+    try:
+        cursor.execute(query)
+        row = cursor.fetchone()
+        if row:
+            return jsonify({
+                'id': row[0],
+                'username': row[1],
+                'email': row[3],
+                'bio': 'User biography here',
+                'created_at': '2025-01-01',
+                'last_login': '2025-01-15'
+            })
+        return jsonify({'error': 'User not found'}), 404
+    except Exception as e:
+        # 취약점: SQL 에러 메시지 노출
+        return jsonify({'error': str(e)}), 500
 
 
-@app.route('/backup')
-def backup_page():
-    """브루트포싱으로 발견 가능한 백업 페이지"""
-    return render_template_string('''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Backup Management</title>
-    <script src="/static/backup-manager.js"></script>
-</head>
-<body>
-    <h1>💾 Backup Management</h1>
-    <p>데이터베이스 백업 관리</p>
-    <div id="backup-list"></div>
-</body>
-</html>
-    ''')
-
-
-@app.route('/api')
-def api_docs():
-    """브루트포싱으로 발견 가능한 API 문서"""
-    return render_template_string('''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>API Documentation</title>
-    <script src="/static/api-client.js"></script>
-    <script src="/static/api-explorer.js"></script>
-</head>
-<body>
-    <h1>📚 API Documentation</h1>
-    <h2>Public APIs</h2>
-    <ul>
-        <li>GET /api/v1/products</li>
-        <li>GET /api/v1/users</li>
-    </ul>
-    <h2>Internal APIs (Shadow APIs)</h2>
-    <ul>
-        <li>GET /api/internal/admin/users</li>
-        <li>GET /api/internal/debug/config</li>
-        <li>GET /api/internal/stats</li>
-        <li>POST /api/internal/execute</li>
-    </ul>
-</body>
-</html>
-    ''')
-
-
-# 추가 Shadow API 엔드포인트
-@app.route('/api/internal/stats', methods=['GET'])
-def internal_stats():
-    """숨겨진 통계 API"""
+# Shadow API: 시스템 메트릭 (민감한 시스템 정보 노출)
+@app.route('/api/internal/metrics', methods=['GET'])
+def get_metrics():
     return jsonify({
-        'total_users': 150,
-        'active_sessions': 42,
-        'server_load': 0.65,
-        'database_size': '2.3GB',
-        'last_backup': '2025-10-13 10:30:00'
+        'system': {
+            'hostname': 'prod-server-01',
+            'os': 'Ubuntu 20.04',
+            'python_version': '3.9.7',
+            'uptime': '45 days',
+            'memory_usage': '78%',
+            'cpu_usage': '34%'
+        },
+        'database': {
+            'host': '10.0.1.50',
+            'port': 5432,
+            'database': 'production_db',
+            'username': 'db_admin',
+            'connections': 45,
+            'max_connections': 100
+        },
+        'api': {
+            'requests_per_minute': 1240,
+            'error_rate': '0.5%',
+            'avg_response_time': '120ms'
+        },
+        'sensitive_paths': [
+            '/var/www/app/config.py',
+            '/etc/nginx/nginx.conf',
+            '/home/admin/.ssh/id_rsa'
+        ]
     })
 
 
-@app.route('/api/internal/execute', methods=['POST'])
-def internal_execute():
-    """위험한 내부 실행 API"""
-    command = request.json.get('command', '')
-    # 취약점: 명령어 실행 (실제로는 실행하지 않음)
+# Shadow API: 로그 조회 (민감한 로그 정보 노출)
+@app.route('/api/internal/logs', methods=['GET'])
+def get_logs():
+    # 쿼리 파라미터로 로그 타입 받기
+    log_type = request.args.get('type', 'all')
+    limit = request.args.get('limit', '50')
+
+    # 의도적인 취약점: 입력 검증 없음
+    logs = [
+        {
+            'timestamp': '2025-01-15 10:30:15',
+            'level': 'INFO',
+            'message': 'User admin logged in from 192.168.1.100',
+            'session_id': 'sess_abc123'
+        },
+        {
+            'timestamp': '2025-01-15 10:31:22',
+            'level': 'WARNING',
+            'message': 'Failed login attempt for user: admin, password: admin123',
+            'ip': '192.168.1.200'
+        },
+        {
+            'timestamp': '2025-01-15 10:32:45',
+            'level': 'ERROR',
+            'message': 'Database connection failed: password=db_password123 host=10.0.1.50',
+            'stack_trace': '/var/www/app/database.py line 45'
+        },
+        {
+            'timestamp': '2025-01-15 10:33:10',
+            'level': 'DEBUG',
+            'message': 'API Key used: sk_live_abc123xyz',
+            'endpoint': '/api/v1/users'
+        },
+        {
+            'timestamp': '2025-01-15 10:34:00',
+            'level': 'INFO',
+            'message': f'Fetching logs with type={log_type}, limit={limit}',
+            'user': 'admin'
+        }
+    ]
+
     return jsonify({
-        'status': 'executed',
-        'command': command,
-        'warning': 'This is a dangerous endpoint!'
+        'total': len(logs),
+        'logs': logs,
+        'query': {
+            'type': log_type,
+            'limit': limit
+        }
     })
-
-
-# 취약한 파일 업로드
-@app.route('/api/v1/upload', methods=['POST'])
-def upload_file():
-    # 취약점: 파일 타입 검증 없음
-    if 'file' in request.files:
-        file = request.files['file']
-        return jsonify({'message': 'File uploaded', 'filename': file.filename})
-    return jsonify({'error': 'No file'}), 400
-
-
-# CSRF 토큰 없는 중요 작업
-@app.route('/api/v1/user/delete', methods=['POST'])
-def delete_user():
-    # 취약점: CSRF 보호 없음
-    user_id = request.json.get('user_id')
-    return jsonify({'message': f'User {user_id} deleted'})
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import axios from 'axios';
 import { 
@@ -18,7 +18,12 @@ import {
   Terminal,
   Copy,
   Check,
-  Download
+  Download,
+  StopCircle,
+  MessageSquare,
+  Send,
+  Bot,
+  User as UserIcon
 } from 'lucide-react';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
@@ -66,6 +71,13 @@ interface ScanDetail {
   };
 }
 
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
+
 export default function ScanDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -75,8 +87,15 @@ export default function ScanDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedEndpoints, setExpandedEndpoints] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'overview' | 'endpoints' | 'paths'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'endpoints' | 'paths' | 'chat'>('overview');
   const [copiedCurl, setCopiedCurl] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
+  
+  // AI Chat states
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   
   // New filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -101,6 +120,25 @@ export default function ScanDetailPage() {
 
     return () => clearInterval(pollInterval);
   }, [scanData?.status]);
+
+  // Auto-scroll chat to bottom when messages change
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [chatMessages, isSendingMessage]);
+
+  // Auto-scroll chat to bottom when switching to chat tab
+  useEffect(() => {
+    if (activeTab === 'chat' && chatContainerRef.current) {
+      // Use setTimeout to ensure DOM is rendered
+      setTimeout(() => {
+        if (chatContainerRef.current) {
+          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
+      }, 100);
+    }
+  }, [activeTab]);
 
   const loadScanDetail = async () => {
     try {
@@ -139,6 +177,70 @@ export default function ScanDetailPage() {
       setTimeout(() => setCopiedCurl(null), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
+    }
+  };
+
+  // Download single endpoint as .http/.req file
+  const downloadSingleEndpoint = async (endpointId: number, event: React.MouseEvent) => {
+    event.stopPropagation();
+    try {
+      const response = await fetch(`http://localhost:5001/api/endpoint/${endpointId}/http-request`);
+      const data = await response.json();
+      
+      if (data.success) {
+        // Create download link
+        const blob = new Blob([data.content], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = data.filename.replace('.http', '.req'); // Use .req extension
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        // Also download as .http
+        const url2 = window.URL.createObjectURL(blob);
+        const a2 = document.createElement('a');
+        a2.href = url2;
+        a2.download = data.filename;
+        document.body.appendChild(a2);
+        a2.click();
+        document.body.removeChild(a2);
+        window.URL.revokeObjectURL(url2);
+      } else {
+        alert('❌ 파일 생성 실패: ' + (data.error || '알 수 없는 오류'));
+      }
+    } catch (err) {
+      console.error('Failed to download:', err);
+      alert('❌ 다운로드 실패: ' + err);
+    }
+  };
+
+  // Download single endpoint as Burp Suite format
+  const downloadBurpRequest = async (endpointId: number, event: React.MouseEvent) => {
+    event.stopPropagation();
+    try {
+      const response = await fetch(`http://localhost:5001/api/endpoint/${endpointId}/http-request?format=burp`);
+      const data = await response.json();
+      
+      if (data.success) {
+        // Create download link
+        const blob = new Blob([data.content], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = data.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      } else {
+        alert('❌ 파일 생성 실패: ' + (data.error || '알 수 없는 오류'));
+      }
+    } catch (err) {
+      console.error('Failed to download:', err);
+      alert('❌ 다운로드 실패: ' + err);
     }
   };
 
@@ -232,6 +334,176 @@ export default function ScanDetailPage() {
     return `${seconds}초`;
   };
 
+  const handleStopScan = async () => {
+    if (!scanData || scanData.status !== 'running') return;
+    
+    if (!confirm('스캔을 정지하시겠습니까? 진행 중인 작업이 취소됩니다.')) {
+      return;
+    }
+
+    try {
+      setStopping(true);
+      await api.post(`/api/scan/${scanId}/stop`);
+      // Reload scan detail after stopping
+      await loadScanDetail();
+      alert('스캔이 정지되었습니다.');
+    } catch (err: any) {
+      console.error('Failed to stop scan:', err);
+      alert(err.response?.data?.error || '스캔 정지에 실패했습니다.');
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!chatInput.trim() || isSendingMessage || !scanData) return;
+
+    const userMessage: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: chatInput.trim(),
+      timestamp: new Date()
+    };
+
+    setChatMessages(prev => [...prev, userMessage]);
+    setChatInput('');
+    setIsSendingMessage(true);
+
+    try {
+      // Prepare comprehensive scan context for AI (with actual endpoint data)
+      const allEndpoints = [
+        ...(scanData.result?.shadow_apis || []),
+        ...(scanData.result?.public_apis || [])
+      ];
+
+      // Sample endpoints by status code for better analysis
+      const endpointsByStatus = {
+        success_2xx: allEndpoints.filter(ep => ep.status_code >= 200 && ep.status_code < 300).slice(0, 5),
+        redirect_3xx: allEndpoints.filter(ep => ep.status_code >= 300 && ep.status_code < 400).slice(0, 3),
+        client_error_4xx: allEndpoints.filter(ep => ep.status_code >= 400 && ep.status_code < 500).slice(0, 5),
+        server_error_5xx: allEndpoints.filter(ep => ep.status_code >= 500 && ep.status_code < 600).slice(0, 3)
+      };
+
+      // Identify sensitive endpoints
+      const sensitivePatterns = /admin|api|auth|login|password|token|key|secret|user|account|config|settings/i;
+      const sensitiveEndpoints = allEndpoints
+        .filter(ep => sensitivePatterns.test(ep.url))
+        .slice(0, 10);
+
+      const scanContext = {
+        target_url: scanData.target_url,
+        status: scanData.status,
+        statistics: scanData.result?.statistics,
+        total_endpoints: allEndpoints.length,
+        discovered_paths_count: scanData.result?.discovered_paths?.length || 0,
+        // Add sample endpoint data with request/response details for intelligent analysis
+        endpoint_samples: {
+          by_status: {
+            success_2xx: endpointsByStatus.success_2xx.map(ep => ({
+              url: ep.url,
+              method: ep.method,
+              status_code: ep.status_code,
+              request_headers: ep.request_headers,
+              request_body: ep.request_body,
+              response_headers: ep.response_headers,
+              response_body: ep.response_body,
+              response_time: ep.response_time,
+              source: ep.source
+            })),
+            redirect_3xx: endpointsByStatus.redirect_3xx.map(ep => ({
+              url: ep.url,
+              method: ep.method,
+              status_code: ep.status_code,
+              request_headers: ep.request_headers,
+              request_body: ep.request_body,
+              response_headers: ep.response_headers,
+              response_body: ep.response_body,
+              response_time: ep.response_time,
+              source: ep.source
+            })),
+            client_error_4xx: endpointsByStatus.client_error_4xx.map(ep => ({
+              url: ep.url,
+              method: ep.method,
+              status_code: ep.status_code,
+              request_headers: ep.request_headers,
+              request_body: ep.request_body,
+              response_headers: ep.response_headers,
+              response_body: ep.response_body,
+              response_time: ep.response_time,
+              source: ep.source
+            })),
+            server_error_5xx: endpointsByStatus.server_error_5xx.map(ep => ({
+              url: ep.url,
+              method: ep.method,
+              status_code: ep.status_code,
+              request_headers: ep.request_headers,
+              request_body: ep.request_body,
+              response_headers: ep.response_headers,
+              response_body: ep.response_body,
+              response_time: ep.response_time,
+              source: ep.source
+            }))
+          },
+          sensitive_endpoints: sensitiveEndpoints.map(ep => ({
+            url: ep.url,
+            method: ep.method,
+            status_code: ep.status_code,
+            request_headers: ep.request_headers,
+            request_body: ep.request_body,
+            response_headers: ep.response_headers,
+            response_body: ep.response_body,
+            response_time: ep.response_time,
+            source: ep.source
+          }))
+        },
+        // Add endpoint methods distribution
+        methods_distribution: {
+          GET: allEndpoints.filter(ep => ep.method === 'GET').length,
+          POST: allEndpoints.filter(ep => ep.method === 'POST').length,
+          PUT: allEndpoints.filter(ep => ep.method === 'PUT').length,
+          DELETE: allEndpoints.filter(ep => ep.method === 'DELETE').length,
+          PATCH: allEndpoints.filter(ep => ep.method === 'PATCH').length
+        }
+      };
+
+      // Send message to AI endpoint (optimized - only last 4 messages)
+      const response = await api.post('/api/chat', {
+        message: userMessage.content,
+        scan_context: scanContext,
+        conversation_history: chatMessages.slice(-4) // Last 4 messages for better performance
+      }, {
+        timeout: 35000 // 35 second timeout
+      });
+
+      const assistantMessage: ChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: response.data.response || '죄송합니다. 응답을 생성할 수 없습니다.',
+        timestamp: new Date()
+      };
+
+      setChatMessages(prev => [...prev, assistantMessage]);
+    } catch (err: any) {
+      console.error('Failed to send message:', err);
+      const errorMessage: ChatMessage = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        content: '죄송합니다. 메시지 전송 중 오류가 발생했습니다. 나중에 다시 시도해주세요.',
+        timestamp: new Date()
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsSendingMessage(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 flex items-center justify-center">
@@ -300,15 +572,27 @@ export default function ScanDetailPage() {
               </div>
 
               <div className="flex flex-col items-end gap-2">
-                <div className={`px-4 py-2 rounded-lg font-semibold ${
-                  scanData.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                  scanData.status === 'running' ? 'bg-yellow-500/20 text-yellow-400' :
-                  scanData.status === 'failed' ? 'bg-red-500/20 text-red-400' :
-                  'bg-gray-500/20 text-gray-400'
-                }`}>
-                  {scanData.status === 'completed' ? '완료' :
-                   scanData.status === 'running' ? '진행중' :
-                   scanData.status === 'failed' ? '실패' : '대기중'}
+                <div className="flex items-center gap-2">
+                  <div className={`px-4 py-2 rounded-lg font-semibold ${
+                    scanData.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                    scanData.status === 'running' ? 'bg-yellow-500/20 text-yellow-400' :
+                    scanData.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                    'bg-gray-500/20 text-gray-400'
+                  }`}>
+                    {scanData.status === 'completed' ? '완료' :
+                     scanData.status === 'running' ? '진행중' :
+                     scanData.status === 'failed' ? '실패' : '대기중'}
+                  </div>
+                  {scanData.status === 'running' && (
+                    <button
+                      onClick={handleStopScan}
+                      disabled={stopping}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-800 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition"
+                    >
+                      <StopCircle className="w-5 h-5" />
+                      {stopping ? '정지 중...' : '스캔 정지'}
+                    </button>
+                  )}
                 </div>
                 {scanData.status === 'running' && (
                   <div className="w-48">
@@ -353,6 +637,7 @@ export default function ScanDetailPage() {
                 <div className="text-3xl font-bold text-red-400">{stats.count_5xx || 0}</div>
               </div>
             </div>
+
           </div>
         </div>
 
@@ -387,6 +672,17 @@ export default function ScanDetailPage() {
             }`}
           >
             발견된 경로 ({stats.discovered_paths || 0})
+          </button>
+          <button
+            onClick={() => setActiveTab('chat')}
+            className={`px-6 py-3 rounded-lg font-semibold transition whitespace-nowrap flex items-center gap-2 ${
+              activeTab === 'chat'
+                ? 'bg-blue-600 text-white'
+                : 'bg-white/10 text-gray-300 hover:bg-white/20'
+            }`}
+          >
+            <MessageSquare className="w-5 h-5" />
+            AI 챗
           </button>
         </div>
 
@@ -545,335 +841,227 @@ export default function ScanDetailPage() {
                 </div>
               </div>
               
-              {scanData.result?.shadow_apis && scanData.result.shadow_apis.length > 0 && (
-                <div className="mb-6">
-                  {(() => {
-                    const filteredShadow = filterAndSortEndpoints(scanData.result!.shadow_apis, 'shadow');
-                    return (
-                      <>
-                        <h3 className="text-xl font-bold text-blue-400 mb-3">
-                          � 엔드포인트 목록 ({filteredShadow.length}/{scanData.result!.shadow_apis.length})
-                        </h3>
-                        {filteredShadow.length === 0 ? (
-                          <div className="text-center py-8 text-gray-400">
-                            <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                            <p>필터 조건에 맞는 엔드포인트가 없습니다</p>
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            {filteredShadow.map((endpoint: any, index: number) => {
-                              const key = `shadow-${index}`;
-                              const isExpanded = expandedEndpoints.has(key);
-                      return (
-                        <div key={key} className="bg-gray-500/20 border border-gray-500/50 rounded-lg overflow-hidden">
-                          <div
-                            className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-500/30 transition"
-                            onClick={() => toggleEndpoint(key)}
-                          >
-                            <div className="flex items-center gap-4 flex-1">
-                              <span className={`px-3 py-1 rounded text-sm font-semibold ${getMethodColor(endpoint.method)}`}>
-                                {endpoint.method}
-                              </span>
-                              <code className="text-gray-200 font-semibold">{endpoint.url}</code>
-                              {endpoint.status_code && (
-                                <span className={`px-2 py-1 rounded text-xs font-semibold ml-2 ${
-                                  endpoint.status_code >= 200 && endpoint.status_code < 300 ? 'bg-green-500/30 text-green-300' :
-                                  endpoint.status_code === 404 ? 'bg-gray-500/30 text-gray-300' :
-                                  endpoint.status_code === 401 || endpoint.status_code === 403 ? 'bg-yellow-500/30 text-yellow-300' :
-                                  endpoint.status_code >= 400 && endpoint.status_code < 500 ? 'bg-orange-500/30 text-orange-300' :
-                                  endpoint.status_code >= 500 ? 'bg-red-500/30 text-red-300' :
-                                  'bg-blue-500/30 text-blue-300'
-                                }`}>
-                                  {endpoint.status_code}
-                                </span>
-                              )}
-                              {endpoint.source && endpoint.source.startsWith('AI:') && (
-                                <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded text-xs font-semibold ml-2">
-                                  🤖 AI
-                                </span>
-                              )}
-                            </div>
-                            {isExpanded ? <ChevronUp className="w-5 h-5 text-red-400" /> : <ChevronDown className="w-5 h-5 text-red-400" />}
-                          </div>
-                          {isExpanded && (
-                            <div className="p-4 bg-red-900/30 border-t border-red-500/50 space-y-3">
-                              {endpoint.curl_command && (
-                                <div>
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-2 text-red-300 font-semibold">
-                                      <Terminal className="w-4 h-4" />
-                                      <span>cURL Command:</span>
-                                    </div>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        copyCurl(endpoint.curl_command, key);
-                                      }}
-                                      className="flex items-center gap-1 px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm transition"
-                                    >
-                                      {copiedCurl === key ? (
-                                        <>
-                                          <Check className="w-4 h-4" />
-                                          <span>복사됨</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Copy className="w-4 h-4" />
-                                          <span>복사</span>
-                                        </>
-                                      )}
-                                    </button>
-                                  </div>
-                                  <pre className="bg-black/30 p-3 rounded text-red-200 text-sm overflow-x-auto whitespace-pre-wrap break-all">
-                                    {endpoint.curl_command}
-                                  </pre>
-                                </div>
-                              )}
-                              {endpoint.headers && Object.keys(endpoint.headers).length > 0 && (
-                                <div>
-                                  <div className="text-red-300 font-semibold mb-2">Headers:</div>
-                                  <pre className="bg-black/30 p-3 rounded text-red-200 text-sm overflow-x-auto">
-                                    {JSON.stringify(endpoint.headers, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-                              {endpoint.body_example && (
-                                <div>
-                                  <div className="text-red-300 font-semibold mb-2">Request Body:</div>
-                                  <pre className="bg-black/30 p-3 rounded text-red-200 text-sm overflow-x-auto">
-                                    {typeof endpoint.body_example === 'string'
-                                      ? endpoint.body_example
-                                      : JSON.stringify(endpoint.body_example, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-                              {endpoint.parameters && Object.keys(endpoint.parameters).length > 0 && (
-                                <div>
-                                  <div className="text-red-300 font-semibold mb-2">Parameters:</div>
-                                  <pre className="bg-black/30 p-3 rounded text-red-200 text-sm overflow-x-auto">
-                                    {JSON.stringify(endpoint.parameters, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-                              {endpoint.response_example && (
-                                <div>
-                                  <div className="text-red-300 font-semibold mb-2">Response Example:</div>
-                                  <pre className="bg-black/30 p-3 rounded text-red-200 text-sm overflow-x-auto">
-                                    {typeof endpoint.response_example === 'string'
-                                      ? endpoint.response_example
-                                      : JSON.stringify(endpoint.response_example, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-                              {endpoint.poc_code && (
-                                <div>
-                                  <div className="text-red-300 font-semibold mb-2">PoC Code:</div>
-                                  <pre className="bg-black/30 p-3 rounded text-red-200 text-sm overflow-x-auto">
-                                    {endpoint.poc_code}
-                                  </pre>
-                                </div>
-                              )}
-                              <div className="flex items-center justify-between pt-2 border-t border-red-500/30">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-red-300 font-semibold">Source: </span>
-                                  <span className="text-red-200">{endpoint.source}</span>
-                                </div>
-                                {endpoint.status_code && (
-                                  <div>
-                                    <span className="text-red-300 font-semibold">Status: </span>
-                                    <span className={`px-2 py-1 rounded text-xs ${
-                                      endpoint.status_code >= 200 && endpoint.status_code < 300 ? 'bg-green-500/20 text-green-300' :
-                                      endpoint.status_code >= 400 ? 'bg-red-500/20 text-red-300' :
-                                      'bg-yellow-500/20 text-yellow-300'
+              {/* Unified Endpoint List */}
+              {(() => {
+                // Combine shadow_apis and public_apis
+                const allEndpoints = [
+                  ...(scanData.result?.shadow_apis || []),
+                  ...(scanData.result?.public_apis || [])
+                ];
+                
+                const filteredEndpoints = filterAndSortEndpoints(allEndpoints, 'all');
+                
+                return (
+                  <>
+                    {filteredEndpoints.length === 0 ? (
+                      <div className="text-center py-8 text-gray-400">
+                        <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                        <p>필터 조건에 맞는 엔드포인트가 없습니다</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-xl font-bold text-white">
+                            전체 엔드포인트 ({filteredEndpoints.length}/{allEndpoints.length})
+                          </h3>
+                        </div>
+                        {filteredEndpoints.map((endpoint: any, index: number) => {
+                          const key = `endpoint-${index}`;
+                          const isExpanded = expandedEndpoints.has(key);
+                          const isShadow = endpoint.is_shadow_api;
+                          
+                          return (
+                            <div 
+                              key={key} 
+                              className={`border rounded-lg overflow-hidden ${
+                                isShadow 
+                                  ? 'bg-red-500/10 border-red-500/50' 
+                                  : 'bg-green-500/10 border-green-500/50'
+                              }`}
+                            >
+                              <div
+                                className={`p-4 flex items-center justify-between cursor-pointer transition ${
+                                  isShadow
+                                    ? 'hover:bg-red-500/20'
+                                    : 'hover:bg-green-500/20'
+                                }`}
+                                onClick={() => toggleEndpoint(key)}
+                              >
+                                <div className="flex items-center gap-4 flex-1">
+                                  {isShadow && (
+                                    <span className="px-2 py-0.5 bg-red-500/30 text-red-300 rounded text-xs font-semibold">
+                                      🔴 Shadow
+                                    </span>
+                                  )}
+                                  {!isShadow && (
+                                    <span className="px-2 py-0.5 bg-green-500/30 text-green-300 rounded text-xs font-semibold">
+                                      🟢 Public
+                                    </span>
+                                  )}
+                                  <span className={`px-3 py-1 rounded text-sm font-semibold ${getMethodColor(endpoint.method)}`}>
+                                    {endpoint.method}
+                                  </span>
+                                  <code className={`font-semibold ${isShadow ? 'text-red-200' : 'text-green-200'}`}>
+                                    {endpoint.url}
+                                  </code>
+                                  {endpoint.status_code && (
+                                    <span className={`px-2 py-1 rounded text-xs font-semibold ml-2 ${
+                                      endpoint.status_code >= 200 && endpoint.status_code < 300 ? 'bg-green-500/30 text-green-300' :
+                                      endpoint.status_code === 404 ? 'bg-gray-500/30 text-gray-300' :
+                                      endpoint.status_code === 401 || endpoint.status_code === 403 ? 'bg-yellow-500/30 text-yellow-300' :
+                                      endpoint.status_code >= 400 && endpoint.status_code < 500 ? 'bg-orange-500/30 text-orange-300' :
+                                      endpoint.status_code >= 500 ? 'bg-red-500/30 text-red-300' :
+                                      'bg-blue-500/30 text-blue-300'
                                     }`}>
                                       {endpoint.status_code}
                                     </span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
-
-              {scanData.result?.public_apis && scanData.result.public_apis.length > 0 && (
-                <div>
-                  {(() => {
-                    const filteredPublic = filterAndSortEndpoints(scanData.result!.public_apis, 'public');
-                    return (
-                      <>
-                        <h3 className="text-xl font-bold text-green-400 mb-3">
-                          🟢 Public APIs ({filteredPublic.length}/{scanData.result!.public_apis.length})
-                        </h3>
-                        {filteredPublic.length === 0 ? (
-                          <div className="text-center py-8 text-gray-400">
-                            <Info className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                            <p>필터 조건에 맞는 Public API가 없습니다</p>
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            {filteredPublic.map((endpoint: any, index: number) => {
-                              const key = `public-${index}`;
-                              const isExpanded = expandedEndpoints.has(key);
-                      return (
-                        <div key={key} className="bg-green-500/20 border border-green-500/50 rounded-lg overflow-hidden">
-                          <div
-                            className="p-4 flex items-center justify-between cursor-pointer hover:bg-green-500/30 transition"
-                            onClick={() => toggleEndpoint(key)}
-                          >
-                            <div className="flex items-center gap-4 flex-1">
-                              <span className={`px-3 py-1 rounded text-sm font-semibold ${getMethodColor(endpoint.method)}`}>
-                                {endpoint.method}
-                              </span>
-                              <code className="text-green-200 font-semibold">{endpoint.url}</code>
-                              {endpoint.status_code && (
-                                <span className={`px-2 py-1 rounded text-xs font-semibold ml-2 ${
-                                  endpoint.status_code >= 200 && endpoint.status_code < 300 ? 'bg-green-500/30 text-green-300' :
-                                  endpoint.status_code === 404 ? 'bg-gray-500/30 text-gray-300' :
-                                  endpoint.status_code === 401 || endpoint.status_code === 403 ? 'bg-yellow-500/30 text-yellow-300' :
-                                  endpoint.status_code >= 400 && endpoint.status_code < 500 ? 'bg-orange-500/30 text-orange-300' :
-                                  endpoint.status_code >= 500 ? 'bg-red-500/30 text-red-300' :
-                                  'bg-blue-500/30 text-blue-300'
-                                }`}>
-                                  {endpoint.status_code}
-                                </span>
-                              )}
-                              {endpoint.source && endpoint.source.startsWith('AI:') && (
-                                <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded text-xs font-semibold ml-2">
-                                  🤖 AI
-                                </span>
-                              )}
-                            </div>
-                            {isExpanded ? <ChevronUp className="w-5 h-5 text-green-400" /> : <ChevronDown className="w-5 h-5 text-green-400" />}
-                          </div>
-                          {isExpanded && (
-                            <div className="p-4 bg-green-900/30 border-t border-green-500/50 space-y-3">
-                              {endpoint.curl_command && (
-                                <div>
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-2 text-green-300 font-semibold">
-                                      <Terminal className="w-4 h-4" />
-                                      <span>cURL Command:</span>
-                                    </div>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        copyCurl(endpoint.curl_command, key);
-                                      }}
-                                      className="flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm transition"
-                                    >
-                                      {copiedCurl === key ? (
-                                        <>
-                                          <Check className="w-4 h-4" />
-                                          <span>복사됨</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Copy className="w-4 h-4" />
-                                          <span>복사</span>
-                                        </>
-                                      )}
-                                    </button>
-                                  </div>
-                                  <pre className="bg-black/30 p-3 rounded text-green-200 text-sm overflow-x-auto whitespace-pre-wrap break-all">
-                                    {endpoint.curl_command}
-                                  </pre>
-                                </div>
-                              )}
-                              {endpoint.headers && Object.keys(endpoint.headers).length > 0 && (
-                                <div>
-                                  <div className="text-green-300 font-semibold mb-2">Headers:</div>
-                                  <pre className="bg-black/30 p-3 rounded text-green-200 text-sm overflow-x-auto">
-                                    {JSON.stringify(endpoint.headers, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-                              {endpoint.body_example && (
-                                <div>
-                                  <div className="text-green-300 font-semibold mb-2">Request Body:</div>
-                                  <pre className="bg-black/30 p-3 rounded text-green-200 text-sm overflow-x-auto">
-                                    {typeof endpoint.body_example === 'string'
-                                      ? endpoint.body_example
-                                      : JSON.stringify(endpoint.body_example, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-                              {endpoint.parameters && Object.keys(endpoint.parameters).length > 0 && (
-                                <div>
-                                  <div className="text-green-300 font-semibold mb-2">Parameters:</div>
-                                  <pre className="bg-black/30 p-3 rounded text-green-200 text-sm overflow-x-auto">
-                                    {JSON.stringify(endpoint.parameters, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-                              {endpoint.response_example && (
-                                <div>
-                                  <div className="text-green-300 font-semibold mb-2">Response Example:</div>
-                                  <pre className="bg-black/30 p-3 rounded text-green-200 text-sm overflow-x-auto">
-                                    {typeof endpoint.response_example === 'string'
-                                      ? endpoint.response_example
-                                      : JSON.stringify(endpoint.response_example, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-                              {endpoint.poc_code && (
-                                <div>
-                                  <div className="text-green-300 font-semibold mb-2">PoC Code:</div>
-                                  <pre className="bg-black/30 p-3 rounded text-green-200 text-sm overflow-x-auto">
-                                    {endpoint.poc_code}
-                                  </pre>
-                                </div>
-                              )}
-                              <div className="flex items-center justify-between pt-2 border-t border-green-500/30">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-green-300 font-semibold">Source: </span>
-                                  <span className="text-green-200">{endpoint.source}</span>
+                                  )}
                                   {endpoint.source && endpoint.source.startsWith('AI:') && (
-                                    <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded text-xs font-semibold">
+                                    <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded text-xs font-semibold ml-2">
                                       🤖 AI
                                     </span>
                                   )}
                                 </div>
-                                {endpoint.status_code && (
-                                  <div>
-                                    <span className="text-green-300 font-semibold">Status: </span>
-                                    <span className={`px-2 py-1 rounded text-xs ${
-                                      endpoint.status_code >= 200 && endpoint.status_code < 300 ? 'bg-green-500/20 text-green-300' :
-                                      endpoint.status_code >= 400 ? 'bg-red-500/20 text-red-300' :
-                                      'bg-yellow-500/20 text-yellow-300'
-                                    }`}>
-                                      {endpoint.status_code}
-                                    </span>
-                                  </div>
+                                {isExpanded ? (
+                                  <ChevronUp className={`w-5 h-5 ${isShadow ? 'text-red-400' : 'text-green-400'}`} />
+                                ) : (
+                                  <ChevronDown className={`w-5 h-5 ${isShadow ? 'text-red-400' : 'text-green-400'}`} />
                                 )}
                               </div>
+                              {isExpanded && (
+                                <div className={`p-4 border-t space-y-3 ${
+                                  isShadow 
+                                    ? 'bg-red-900/20 border-red-500/50' 
+                                    : 'bg-green-900/20 border-green-500/50'
+                                }`}>
+                                  {endpoint.curl_command && (
+                                    <div>
+                                      <div className="flex items-center justify-between mb-2">
+                                        <div className={`flex items-center gap-2 font-semibold ${
+                                          isShadow ? 'text-red-300' : 'text-green-300'
+                                        }`}>
+                                          <Terminal className="w-4 h-4" />
+                                          <span>cURL Command:</span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              copyCurl(endpoint.curl_command, key);
+                                            }}
+                                            className={`flex items-center gap-1 px-3 py-1 text-white rounded text-sm transition ${
+                                              isShadow
+                                                ? 'bg-red-600 hover:bg-red-700'
+                                                : 'bg-green-600 hover:bg-green-700'
+                                            }`}
+                                          >
+                                            {copiedCurl === key ? (
+                                              <>
+                                                <Check className="w-4 h-4" />
+                                                <span>복사됨</span>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Copy className="w-4 h-4" />
+                                                <span>복사</span>
+                                              </>
+                                            )}
+                                          </button>
+                                          <button
+                                            onClick={(e) => downloadSingleEndpoint(endpoint.id, e)}
+                                            className="flex items-center gap-1 px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm transition"
+                                          >
+                                            <Download className="w-4 h-4" />
+                                            <span>.req</span>
+                                          </button>
+                                          <button
+                                            onClick={(e) => downloadBurpRequest(endpoint.id, e)}
+                                            className="flex items-center gap-1 px-3 py-1 bg-orange-600 hover:bg-orange-700 text-white rounded text-sm transition"
+                                          >
+                                            <Download className="w-4 h-4" />
+                                            <span>Burp</span>
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <pre className={`bg-black/30 p-3 rounded text-sm overflow-x-auto whitespace-pre-wrap break-all ${
+                                        isShadow ? 'text-red-200' : 'text-green-200'
+                                      }`}>
+                                        {endpoint.curl_command}
+                                      </pre>
+                                    </div>
+                                  )}
+                                  {endpoint.headers && Object.keys(endpoint.headers).length > 0 && (
+                                    <div>
+                                      <div className={`font-semibold mb-2 ${isShadow ? 'text-red-300' : 'text-green-300'}`}>
+                                        Headers:
+                                      </div>
+                                      <pre className={`bg-black/30 p-3 rounded text-sm overflow-x-auto ${
+                                        isShadow ? 'text-red-200' : 'text-green-200'
+                                      }`}>
+                                        {JSON.stringify(endpoint.headers, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+                                  {endpoint.body_example && (
+                                    <div>
+                                      <div className={`font-semibold mb-2 ${isShadow ? 'text-red-300' : 'text-green-300'}`}>
+                                        Request Body:
+                                      </div>
+                                      <pre className={`bg-black/30 p-3 rounded text-sm overflow-x-auto ${
+                                        isShadow ? 'text-red-200' : 'text-green-200'
+                                      }`}>
+                                        {typeof endpoint.body_example === 'string'
+                                          ? endpoint.body_example
+                                          : JSON.stringify(endpoint.body_example, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+                                  {endpoint.parameters && Object.keys(endpoint.parameters).length > 0 && (
+                                    <div>
+                                      <div className={`font-semibold mb-2 ${isShadow ? 'text-red-300' : 'text-green-300'}`}>
+                                        Parameters:
+                                      </div>
+                                      <pre className={`bg-black/30 p-3 rounded text-sm overflow-x-auto ${
+                                        isShadow ? 'text-red-200' : 'text-green-200'
+                                      }`}>
+                                        {JSON.stringify(endpoint.parameters, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+                                  {endpoint.response_example && (
+                                    <div>
+                                      <div className={`font-semibold mb-2 ${isShadow ? 'text-red-300' : 'text-green-300'}`}>
+                                        Response Example:
+                                      </div>
+                                      <pre className={`bg-black/30 p-3 rounded text-sm overflow-x-auto ${
+                                        isShadow ? 'text-red-200' : 'text-green-200'
+                                      }`}>
+                                        {typeof endpoint.response_example === 'string'
+                                          ? endpoint.response_example
+                                          : JSON.stringify(endpoint.response_example, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+                                  {endpoint.source && (
+                                    <div>
+                                      <div className={`font-semibold mb-2 ${isShadow ? 'text-red-300' : 'text-green-300'}`}>
+                                        Source:
+                                      </div>
+                                      <div className={`text-sm ${isShadow ? 'text-red-200' : 'text-green-200'}`}>
+                                        {endpoint.source}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      );
-                            })}
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
-
-              {(!scanData.result?.endpoints || scanData.result.endpoints.length === 0) && (
-                <div className="text-center py-12 text-gray-400">
-                  <Info className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p>발견된 엔드포인트가 없습니다</p>
-                </div>
-              )}
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
 
@@ -924,6 +1112,155 @@ export default function ScanDetailPage() {
                   <p>발견된 경로가 없습니다</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* AI Chat Tab */}
+          {activeTab === 'chat' && (
+            <div className="flex flex-col h-[600px]">
+              <div className="mb-4">
+                <h2 className="text-2xl font-bold text-white mb-2 flex items-center gap-2">
+                  <Bot className="w-7 h-7 text-blue-400" />
+                  AI 어시스턴트
+                  <span className="text-xs px-2 py-1 bg-green-600/20 text-green-400 rounded-full font-normal">
+                    🧠 고급 분석 모드
+                  </span>
+                </h2>
+                <p className="text-gray-400 text-sm mb-3">
+                  실제 엔드포인트 데이터를 분석하여 구체적인 보안 권장사항을 제공합니다.
+                </p>
+                
+                {/* Quick Question Buttons */}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setChatInput('스캔 결과를 요약하고 주요 발견사항을 알려줘')}
+                    className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 rounded-lg text-xs font-semibold transition"
+                  >
+                    📊 스캔 요약
+                  </button>
+                  <button
+                    onClick={() => setChatInput('보안 취약점을 분석하고 위험도를 평가해줘')}
+                    className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 rounded-lg text-xs font-semibold transition"
+                  >
+                    🔒 보안 분석
+                  </button>
+                  <button
+                    onClick={() => setChatInput('4xx 에러가 발생한 엔드포인트를 분석해줘')}
+                    className="px-3 py-1.5 bg-orange-600/20 hover:bg-orange-600/30 text-orange-300 rounded-lg text-xs font-semibold transition"
+                  >
+                    ⚠️ 에러 분석
+                  </button>
+                  <button
+                    onClick={() => setChatInput('민감한 엔드포인트(admin, api, auth 등)의 보안 상태를 점검해줘')}
+                    className="px-3 py-1.5 bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-300 rounded-lg text-xs font-semibold transition"
+                  >
+                    🎯 민감 엔드포인트
+                  </button>
+                  <button
+                    onClick={() => setChatInput('API 설계 품질을 평가하고 개선 방안을 제안해줘')}
+                    className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-xs font-semibold transition"
+                  >
+                    💡 개선 권장
+                  </button>
+                </div>
+              </div>
+
+              {/* Chat Messages */}
+              <div 
+                ref={chatContainerRef}
+                className="flex-1 overflow-y-auto bg-gray-800/50 rounded-lg p-4 mb-4 space-y-4"
+              >
+                {chatMessages.length === 0 ? (
+                  <div className="text-center py-12 text-gray-400">
+                    <Bot className="w-16 h-16 mx-auto mb-4 opacity-30 text-blue-400" />
+                    <h3 className="text-lg font-semibold text-white mb-2">고급 AI 분석 준비 완료</h3>
+                    <p className="mb-4 text-sm">실제 엔드포인트 데이터를 기반으로 구체적인 분석을 제공합니다</p>
+                    <div className="text-sm space-y-2 mt-4 max-w-md mx-auto text-left">
+                      <p className="text-gray-500 font-semibold">💡 똑똑한 질문 예시:</p>
+                      <div className="bg-gray-700/30 rounded-lg p-3 space-y-1.5">
+                        <p className="text-blue-400">• "GET 메서드가 가장 많은데, POST/PUT/DELETE는 왜 적어?"</p>
+                        <p className="text-blue-400">• "401/403 에러가 있는 엔드포인트의 보안 상태는?"</p>
+                        <p className="text-blue-400">• "/admin이나 /api 경로의 접근 제어는 적절해?"</p>
+                        <p className="text-blue-400">• "5xx 에러가 발생한 엔드포인트를 우선순위로 수정해야 해?"</p>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-3">👆 위 버튼을 클릭하거나 직접 질문을 입력하세요</p>
+                    </div>
+                  </div>
+                ) : (
+                  chatMessages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`flex gap-3 ${
+                        msg.role === 'user' ? 'justify-end' : 'justify-start'
+                      }`}
+                    >
+                      {msg.role === 'assistant' && (
+                        <div className="flex-shrink-0">
+                          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center">
+                            <Bot className="w-5 h-5 text-white" />
+                          </div>
+                        </div>
+                      )}
+                      <div
+                        className={`max-w-[80%] rounded-lg p-4 ${
+                          msg.role === 'user'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-700/50 text-gray-200'
+                        }`}
+                      >
+                        <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                        <div className="text-xs opacity-70 mt-2">
+                          {msg.timestamp.toLocaleTimeString('ko-KR')}
+                        </div>
+                      </div>
+                      {msg.role === 'user' && (
+                        <div className="flex-shrink-0">
+                          <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center">
+                            <UserIcon className="w-5 h-5 text-white" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+                {isSendingMessage && (
+                  <div className="flex gap-3 justify-start">
+                    <div className="flex-shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center">
+                        <Bot className="w-5 h-5 text-white" />
+                      </div>
+                    </div>
+                    <div className="bg-gray-700/50 text-gray-200 rounded-lg p-4">
+                      <div className="flex gap-1">
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Chat Input */}
+              <div className="flex gap-2">
+                <textarea
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="스캔 결과에 대해 질문하세요... (Shift+Enter로 줄바꿈, Enter로 전송)"
+                  disabled={isSendingMessage}
+                  className="flex-1 px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
+                  rows={3}
+                />
+                <button
+                  onClick={handleSendMessage}
+                  disabled={!chatInput.trim() || isSendingMessage}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition flex items-center gap-2"
+                >
+                  <Send className="w-5 h-5" />
+                  전송
+                </button>
+              </div>
             </div>
           )}
         </div>

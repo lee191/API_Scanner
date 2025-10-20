@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Level 2</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #333; }
+        .level-badge { background: #f44336; color: white; padding: 5px 10px; border-radius: 5px; font-size: 0.9em; }
+        .links { margin: 30px 0; }
+        .links a { display: inline-block; margin: 10px; padding: 10px 20px; background: #2196f3; color: white; text-decoration: none; border-radius: 5px; }
+        .links a:hover { background: #0d47a1; }
+        .info { background: white; padding: 20px; border-radius: 10px; margin: 20px 0; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .breadcrumb { color: #666; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="breadcrumb">🏠 Home → Products → Admin</div>
+    <h1>🔐 Admin Page <span class="level-badge">Level 2</span></h1>
+    
+    <div class="info">
+        <ul>
+            <li>현재 레벨: <strong>2</strong></li>
+            <li>로드된 JS 파일: <strong>admin.js</strong></li>
+            <li>admin.js의 API: /api/admin/stats, /api/admin/users, /api/admin/config, /api/admin/logs</li>
+        </ul>
+    </div>
+    
+    <div class="links">
+        <h3>← Level 1로 돌아가기:</h3>
+        <a href="/products">제품</a>
+        <a href="/">홈</a>
+        
+        <h3>→ Level 3 페이지로 이동:</h3>
+        <a href="/dashboard">대시보드</a>
+        <a href="/analytics">분석</a>
+    </div>
+    
+    <script src="/static/admin.js"></script>
+</body>
+</html>

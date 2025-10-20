@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Users - Level 1</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #333; }
+        .level-badge { background: #ff9800; color: white; padding: 5px 10px; border-radius: 5px; font-size: 0.9em; }
+        .links { margin: 30px 0; }
+        .links a { display: inline-block; margin: 10px; padding: 10px 20px; background: #2196f3; color: white; text-decoration: none; border-radius: 5px; }
+        .links a:hover { background: #0d47a1; }
+        .info { background: white; padding: 20px; border-radius: 10px; margin: 20px 0; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .breadcrumb { color: #666; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="breadcrumb">🏠 Home → Users</div>
+    <h1>👥 Users Page <span class="level-badge">Level 1</span></h1>
+    
+    <div class="info">
+        <ul>
+            <li>현재 레벨: <strong>1</strong></li>
+            <li>로드된 JS 파일: <strong>users.js</strong></li>
+            <li>users.js의 API: /api/users, /api/users/{id}, /api/users/{id}/profile</li>
+        </ul>
+    </div>
+    
+    <div class="links">
+        <h3>← Level 0로 돌아가기:</h3>
+        <a href="/">홈</a>
+        
+        <h3>→ Level 2 페이지로 이동:</h3>
+        <a href="/reports">리포트</a>
+    </div>
+    
+    <script src="/static/users.js"></script>
+</body>
+</html>

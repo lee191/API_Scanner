@@ -1,0 +1,18 @@
+{
+  "rest-client.environmentVariables": {
+    "$shared": {
+      "baseUrl": "http://localhost:5001",
+      "targetUrl": "http://localhost:5000"
+    },
+    "local": {
+      "baseUrl": "http://localhost:5001",
+      "projectId": "your-project-id-here",
+      "scanId": "your-scan-id-here"
+    },
+    "production": {
+      "baseUrl": "https://api.yourdomain.com",
+      "projectId": "",
+      "scanId": ""
+    }
+  }
+}

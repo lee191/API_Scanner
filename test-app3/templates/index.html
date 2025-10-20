@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test App 3 - Level 0 (Home)</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #333; }
+        .level-badge { background: #4caf50; color: white; padding: 5px 10px; border-radius: 5px; font-size: 0.9em; }
+        .links { margin: 30px 0; }
+        .links a { display: inline-block; margin: 10px; padding: 10px 20px; background: #2196f3; color: white; text-decoration: none; border-radius: 5px; }
+        .links a:hover { background: #0d47a1; }
+        .info { background: white; padding: 20px; border-radius: 10px; margin: 20px 0; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <h1>🏠 Test App 3 - Home <span class="level-badge">Level 0</span></h1>
+    
+    <div class="info">
+        <h2>크롤링 깊이 테스트 앱</h2>
+        <p>이 앱은 <strong>3단계 깊이</strong>의 웹 페이지 크롤링을 테스트합니다.</p>
+        <ul>
+            <li>현재 레벨: <strong>0 (시작점)</strong></li>
+            <li>로드된 JS 파일: <strong>main.js</strong></li>
+            <li>main.js의 API: /api/health, /api/info</li>
+        </ul>
+    </div>
+    
+    <div class="links">
+        <h3>→ Level 1 페이지로 이동:</h3>
+        <a href="/products">제품 페이지</a>
+        <a href="/users">사용자 페이지</a>
+    </div>
+    
+    <script src="/static/main.js"></script>
+</body>
+</html>

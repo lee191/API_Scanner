@@ -145,6 +145,13 @@ class Endpoint(Base):
     body_example = Column(Text, nullable=True)
     response_example = Column(Text, nullable=True)
 
+    # Enhanced request/response data for AI analysis
+    request_headers = Column(JSON, nullable=True)
+    request_body = Column(Text, nullable=True)
+    response_headers = Column(JSON, nullable=True)
+    response_body = Column(Text, nullable=True)
+    response_time = Column(Integer, nullable=True)  # milliseconds
+
     poc_code = Column(Text, nullable=True)
     curl_command = Column(Text, nullable=True)
 
@@ -167,6 +174,11 @@ class Endpoint(Base):
             'headers': self.headers,
             'body_example': self.body_example,
             'response_example': self.response_example,
+            'request_headers': self.request_headers,
+            'request_body': self.request_body,
+            'response_headers': self.response_headers,
+            'response_body': self.response_body,
+            'response_time': self.response_time,
             'poc_code': self.poc_code,
             'curl_command': self.curl_command,
             'status_code': self.status_code,

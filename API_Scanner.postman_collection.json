@@ -1,0 +1,86 @@
+{
+  "info": {
+    "name": "Shadow API Scanner",
+    "description": "API 스캐너 테스트용 Postman 컬렉션",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5001",
+      "type": "string"
+    },
+    {
+      "key": "project_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "scan_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "프로젝트 관리",
+      "item": [
+        {
+          "name": "프로젝트 목록",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/projects"
+          }
+        },
+        {
+          "name": "프로젝트 생성",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\\ud14c\\uc2a4\\ud2b8 \\ud504\\ub85c\\uc81d\\ud2b8\",\n  \"description\": \"Postman\\uc73c\\ub85c \\uc0dd\\uc131\"\n}"
+            },
+            "url": "{{base_url}}/api/projects"
+          }
+        }
+      ]
+    },
+    {
+      "name": "스캔",
+      "item": [
+        {
+          "name": "스캔 시작",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"project_id\": \"{{project_id}}\",\n  \"target_url\": \"http://localhost:5000\",\n  \"analysis_type\": \"both\",\n  \"ai_enabled\": true,\n  \"bruteforce_enabled\": true,\n  \"validate\": true\n}"
+            },
+            "url": "{{base_url}}/api/scan"
+          }
+        },
+        {
+          "name": "스캔 상태",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/status/{{scan_id}}"
+          }
+        }
+      ]
+    }
+  ]
+}

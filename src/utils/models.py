@@ -41,6 +41,14 @@ class APIEndpoint(BaseModel):
     headers: Dict[str, str] = Field(default_factory=dict)
     body_example: Optional[str] = None
     response_example: Optional[str] = None
+    
+    # Enhanced request/response data for AI analysis
+    request_headers: Optional[Dict[str, str]] = None
+    request_body: Optional[str] = None
+    response_headers: Optional[Dict[str, str]] = None
+    response_body: Optional[str] = None
+    response_time: Optional[int] = None  # milliseconds
+    
     poc_code: Optional[str] = None  # Proof of Concept code to test the endpoint
     curl_command: Optional[str] = None  # cURL command for endpoint validation
     status_code: Optional[int] = None

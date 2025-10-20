@@ -264,11 +264,19 @@ def full_scan(target, js_path, bruteforce, wordlist, validate, ai, static_only, 
 
         # Validate each endpoint with progress bar
         for endpoint in tqdm(all_endpoints, desc="검증 중"):
-            is_valid, status_code, response = validator.validate_endpoint(endpoint)
+            is_valid, status_code, response, detailed_data = validator.validate_endpoint(endpoint)
 
             # Update endpoint with validation result
             endpoint.status_code = status_code
             endpoint.response_example = response
+            
+            # Store detailed request/response data for AI analysis
+            if detailed_data:
+                endpoint.request_headers = detailed_data.get('request_headers')
+                endpoint.request_body = detailed_data.get('request_body')
+                endpoint.response_headers = detailed_data.get('response_headers')
+                endpoint.response_body = detailed_data.get('response_body')
+                endpoint.response_time = detailed_data.get('response_time')
 
             if is_valid:
                 valid_count += 1

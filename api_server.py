@@ -286,6 +286,8 @@ def get_scan_status(scan_id):
 
     except Exception as e:
         print(f"[!] Get status error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': 'Failed to get scan status', 'details': str(e)}), 500
 
 
@@ -395,6 +397,8 @@ def create_project():
             })
     except Exception as e:
         print(f"[!] Create project error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': 'Failed to create project', 'details': str(e)}), 500
 
 
@@ -598,6 +602,8 @@ def delete_project(project_id):
                 return jsonify({'error': 'Project not found'}), 404
     except Exception as e:
         print(f"[!] Delete project error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': 'Failed to delete project', 'details': str(e)}), 500
 
 
@@ -619,13 +625,384 @@ def generate_all_pocs_for_scan(scan_id):
     }), 503
 
 
-@app.route('/api/endpoint/<int:endpoint_id>/curl', methods=['GET'])
-def generate_curl_command(endpoint_id):
-    """Curl generation is no longer supported."""
-    return jsonify({
-        'error': 'Curl generation feature has been removed',
-        'details': 'Curl command generation is no longer available'
-    }), 503
+@app.route('/api/endpoint/<int:endpoint_id>/http-request', methods=['GET'])
+def generate_single_http_request(endpoint_id):
+    """Generate .http/.req file for a single endpoint."""
+    try:
+        format_type = request.args.get('format', 'http')  # http, burp
+        
+        with get_db() as db:
+            from src.database.models import Endpoint
+            endpoint = db.query(Endpoint).filter(Endpoint.id == endpoint_id).first()
+            if not endpoint:
+                return jsonify({'error': 'Endpoint not found'}), 404
+            
+            # Get scan info for base URL
+            scan = ScanRepository.get_scan_by_id(db, endpoint.scan_id)
+            target_url = scan.target_url if scan else 'http://localhost'
+            
+            # Parse URL
+            from urllib.parse import urlparse
+            parsed = urlparse(target_url)
+            host = parsed.netloc or 'localhost:5000'
+            scheme = parsed.scheme or 'http'
+            
+            url = endpoint.url
+            if not url.startswith('http'):
+                full_url = f"{target_url}{url}"
+            else:
+                full_url = url
+            
+            # Generate Burp Suite format (Raw HTTP)
+            if format_type == 'burp':
+                burp_content = f"{endpoint.method} {url} HTTP/1.1\r\n"
+                burp_content += f"Host: {host}\r\n"
+                
+                # Add headers
+                default_headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate',
+                    'Connection': 'keep-alive'
+                }
+                
+                added_headers = set()
+                
+                # Add captured headers first
+                if endpoint.request_headers:
+                    try:
+                        headers = json.loads(endpoint.request_headers) if isinstance(endpoint.request_headers, str) else endpoint.request_headers
+                        for key, value in headers.items():
+                            if key.lower() not in ['host', 'content-length']:
+                                burp_content += f"{key}: {value}\r\n"
+                                added_headers.add(key.lower())
+                    except Exception as e:
+                        print(f"[!] Error parsing headers: {e}")
+                
+                # Add default headers if not already present
+                for key, value in default_headers.items():
+                    if key.lower() not in added_headers:
+                        burp_content += f"{key}: {value}\r\n"
+                
+                # Add Content-Type for POST/PUT/PATCH if not present
+                if endpoint.method in ['POST', 'PUT', 'PATCH']:
+                    if 'content-type' not in added_headers:
+                        burp_content += "Content-Type: application/json\r\n"
+                    
+                    # Get body content
+                    if endpoint.request_body:
+                        try:
+                            # If it's a JSON string, parse and re-format it nicely
+                            if isinstance(endpoint.request_body, str):
+                                try:
+                                    body_obj = json.loads(endpoint.request_body)
+                                    body = json.dumps(body_obj, indent=2)
+                                except:
+                                    body = endpoint.request_body
+                            else:
+                                body = json.dumps(endpoint.request_body, indent=2)
+                        except:
+                            body = str(endpoint.request_body)
+                    elif endpoint.parameters:
+                        # Use parameters from JS analysis
+                        try:
+                            params = json.loads(endpoint.parameters) if isinstance(endpoint.parameters, str) else endpoint.parameters
+                            body_obj = {}
+                            
+                            for key, value in params.items():
+                                # Generate appropriate values based on parameter name
+                                key_lower = key.lower()
+                                if any(x in key_lower for x in ['user', 'username', 'login']):
+                                    body_obj[key] = "admin"
+                                elif any(x in key_lower for x in ['pass', 'password', 'pwd']):
+                                    body_obj[key] = "password123"
+                                elif any(x in key_lower for x in ['email', 'mail']):
+                                    body_obj[key] = "user@example.com"
+                                elif any(x in key_lower for x in ['name', 'fullname', 'firstname']):
+                                    body_obj[key] = "John Doe"
+                                elif any(x in key_lower for x in ['phone', 'tel', 'mobile']):
+                                    body_obj[key] = "010-1234-5678"
+                                elif any(x in key_lower for x in ['token', 'key', 'apikey']):
+                                    body_obj[key] = "your_token_here"
+                                elif any(x in key_lower for x in ['id', 'userid', 'user_id']):
+                                    body_obj[key] = 1
+                                elif any(x in key_lower for x in ['count', 'limit', 'size', 'page']):
+                                    body_obj[key] = 10
+                                elif any(x in key_lower for x in ['enable', 'active', 'is_']):
+                                    body_obj[key] = True
+                                elif isinstance(value, str):
+                                    body_obj[key] = value if value else "example_value"
+                                elif isinstance(value, bool):
+                                    body_obj[key] = True
+                                elif isinstance(value, (int, float)):
+                                    body_obj[key] = value if value else 0
+                                else:
+                                    body_obj[key] = str(value) if value else "value"
+                            
+                            body = json.dumps(body_obj, indent=2)
+                        except Exception as e:
+                            print(f"[!] Error generating body from parameters: {e}")
+                            # Fallback to URL-based generation
+                            if 'login' in url.lower() or 'auth' in url.lower():
+                                body = json.dumps({
+                                    "username": "admin",
+                                    "password": "password123"
+                                }, indent=2)
+                            elif 'register' in url.lower() or 'signup' in url.lower():
+                                body = json.dumps({
+                                    "username": "newuser",
+                                    "email": "user@example.com",
+                                    "password": "password123"
+                                }, indent=2)
+                            else:
+                                body = json.dumps({
+                                    "key": "value",
+                                    "data": "example"
+                                }, indent=2)
+                    else:
+                        # Generate example body based on common patterns
+                        if 'login' in url.lower() or 'auth' in url.lower():
+                            body = json.dumps({
+                                "username": "admin",
+                                "password": "password123"
+                            }, indent=2)
+                        elif 'register' in url.lower() or 'signup' in url.lower():
+                            body = json.dumps({
+                                "username": "newuser",
+                                "email": "user@example.com",
+                                "password": "password123"
+                            }, indent=2)
+                        elif 'user' in url.lower():
+                            body = json.dumps({
+                                "name": "John Doe",
+                                "email": "john@example.com",
+                                "role": "user"
+                            }, indent=2)
+                        else:
+                            body = json.dumps({
+                                "key": "value",
+                                "data": "example"
+                            }, indent=2)
+                    
+                    burp_content += f"Content-Length: {len(body.encode('utf-8'))}\r\n"
+                    burp_content += "\r\n"
+                    burp_content += body
+                else:
+                    burp_content += "\r\n"
+                
+                safe_url = url.replace('/', '_').replace(':', '').replace('?', '_').replace('&', '_')[:50]
+                filename = f"{endpoint.method}_{safe_url}_burp.txt"
+                
+                return jsonify({
+                    'success': True,
+                    'content': burp_content,
+                    'filename': filename,
+                    'format': 'burp'
+                })
+            
+            # Generate .http/.req content (default)
+            else:
+                http_content = f"""### Shadow API Scanner - Single Endpoint
+### Endpoint ID: {endpoint.id}
+### Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+### ============================================================
+### Variables
+### ============================================================
+@baseUrl = {target_url}
+
+### ============================================================
+### {endpoint.method} {endpoint.url}
+### ============================================================
+
+"""
+                
+                # Clean URL
+                if not url.startswith('http'):
+                    full_url_var = f"{{{{baseUrl}}}}{url}"
+                else:
+                    full_url_var = url
+                
+                # Add comment with status code
+                http_content += f"### {endpoint.method} {url}\n"
+                http_content += f"# Status: {endpoint.status_code}\n"
+                
+                # Add Response Time if available
+                if endpoint.response_time:
+                    http_content += f"# Response Time: {endpoint.response_time}ms\n"
+                
+                # Add request
+                http_content += f"{endpoint.method} {full_url_var}\n"
+                
+                # Add headers
+                added_headers = set()
+                if endpoint.request_headers:
+                    try:
+                        headers = json.loads(endpoint.request_headers) if isinstance(endpoint.request_headers, str) else endpoint.request_headers
+                        for key, value in headers.items():
+                            if key.lower() not in ['host', 'content-length']:
+                                http_content += f"{key}: {value}\n"
+                                added_headers.add(key.lower())
+                    except Exception as e:
+                        print(f"[!] Error parsing headers: {e}")
+                
+                # Add default headers if not present
+                if 'user-agent' not in added_headers:
+                    http_content += "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\n"
+                if 'accept' not in added_headers:
+                    http_content += "Accept: application/json, text/plain, */*\n"
+                
+                # Add body for POST/PUT/PATCH
+                if endpoint.method in ['POST', 'PUT', 'PATCH']:
+                    if 'content-type' not in added_headers:
+                        http_content += "Content-Type: application/json\n"
+                    
+                    http_content += "\n"
+                    
+                    if endpoint.request_body:
+                        try:
+                            # If it's a JSON string, parse and re-format it nicely
+                            if isinstance(endpoint.request_body, str):
+                                try:
+                                    body_obj = json.loads(endpoint.request_body)
+                                    http_content += json.dumps(body_obj, indent=2) + "\n"
+                                except:
+                                    http_content += endpoint.request_body + "\n"
+                            else:
+                                http_content += json.dumps(endpoint.request_body, indent=2) + "\n"
+                        except:
+                            http_content += str(endpoint.request_body) + "\n"
+                    elif endpoint.parameters:
+                        # Use parameters from JS analysis
+                        try:
+                            params = json.loads(endpoint.parameters) if isinstance(endpoint.parameters, str) else endpoint.parameters
+                            body_obj = {}
+                            
+                            for key, value in params.items():
+                                # Generate appropriate values based on parameter name
+                                key_lower = key.lower()
+                                if any(x in key_lower for x in ['user', 'username', 'login']):
+                                    body_obj[key] = "admin"
+                                elif any(x in key_lower for x in ['pass', 'password', 'pwd']):
+                                    body_obj[key] = "password123"
+                                elif any(x in key_lower for x in ['email', 'mail']):
+                                    body_obj[key] = "user@example.com"
+                                elif any(x in key_lower for x in ['name', 'fullname', 'firstname']):
+                                    body_obj[key] = "John Doe"
+                                elif any(x in key_lower for x in ['phone', 'tel', 'mobile']):
+                                    body_obj[key] = "010-1234-5678"
+                                elif any(x in key_lower for x in ['token', 'key', 'apikey']):
+                                    body_obj[key] = "your_token_here"
+                                elif any(x in key_lower for x in ['id', 'userid', 'user_id']):
+                                    body_obj[key] = 1
+                                elif any(x in key_lower for x in ['count', 'limit', 'size', 'page']):
+                                    body_obj[key] = 10
+                                elif any(x in key_lower for x in ['enable', 'active', 'is_']):
+                                    body_obj[key] = True
+                                elif isinstance(value, str):
+                                    body_obj[key] = value if value else "example_value"
+                                elif isinstance(value, bool):
+                                    body_obj[key] = True
+                                elif isinstance(value, (int, float)):
+                                    body_obj[key] = value if value else 0
+                                else:
+                                    body_obj[key] = str(value) if value else "value"
+                            
+                            http_content += json.dumps(body_obj, indent=2) + "\n"
+                        except Exception as e:
+                            print(f"[!] Error generating body from parameters: {e}")
+                            # Fallback to URL-based generation
+                            if 'login' in url.lower() or 'auth' in url.lower():
+                                http_content += json.dumps({
+                                    "username": "admin",
+                                    "password": "password123"
+                                }, indent=2) + "\n"
+                            elif 'register' in url.lower() or 'signup' in url.lower():
+                                http_content += json.dumps({
+                                    "username": "newuser",
+                                    "email": "user@example.com",
+                                    "password": "password123"
+                                }, indent=2) + "\n"
+                            else:
+                                http_content += json.dumps({
+                                    "key": "value",
+                                    "data": "example"
+                                }, indent=2) + "\n"
+                    else:
+                        # Generate example body based on common patterns
+                        if 'login' in url.lower() or 'auth' in url.lower():
+                            http_content += json.dumps({
+                                "username": "admin",
+                                "password": "password123"
+                            }, indent=2) + "\n"
+                        elif 'register' in url.lower() or 'signup' in url.lower():
+                            http_content += json.dumps({
+                                "username": "newuser",
+                                "email": "user@example.com",
+                                "password": "password123"
+                            }, indent=2) + "\n"
+                        elif 'user' in url.lower():
+                            http_content += json.dumps({
+                                "name": "John Doe",
+                                "email": "john@example.com",
+                                "role": "user"
+                            }, indent=2) + "\n"
+                        else:
+                            http_content += json.dumps({
+                                "key": "value",
+                                "data": "example"
+                            }, indent=2) + "\n"
+                
+                http_content += "\n###\n"
+                
+                # Add response info if available
+                if endpoint.response_headers or endpoint.response_body:
+                    http_content += "\n### Expected Response\n"
+                    if endpoint.response_headers:
+                        try:
+                            resp_headers = json.loads(endpoint.response_headers) if isinstance(endpoint.response_headers, str) else endpoint.response_headers
+                            http_content += "# Response Headers:\n"
+                            for key, value in resp_headers.items():
+                                http_content += f"#   {key}: {value}\n"
+                        except:
+                            pass
+                    
+                    if endpoint.response_body:
+                        http_content += "\n# Response Body:\n"
+                        try:
+                            if isinstance(endpoint.response_body, str):
+                                try:
+                                    resp_obj = json.loads(endpoint.response_body)
+                                    formatted = json.dumps(resp_obj, indent=2)
+                                    for line in formatted.split('\n'):
+                                        http_content += f"# {line}\n"
+                                except:
+                                    for line in endpoint.response_body.split('\n')[:20]:  # Limit to 20 lines
+                                        http_content += f"# {line}\n"
+                            else:
+                                formatted = json.dumps(endpoint.response_body, indent=2)
+                                for line in formatted.split('\n'):
+                                    http_content += f"# {line}\n"
+                        except:
+                            pass
+                
+                # Generate filename
+                safe_url = url.replace('/', '_').replace(':', '').replace('?', '_').replace('&', '_')[:50]
+                filename = f"{endpoint.method}_{safe_url}.http"
+                
+                return jsonify({
+                    'success': True,
+                    'content': http_content,
+                    'filename': filename,
+                    'format': 'http'
+                })
+            
+    except Exception as e:
+        print(f"[!] Error generating HTTP request: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/scan/<scan_id>/endpoints/curl-all', methods=['GET'])
@@ -646,10 +1023,342 @@ def generate_postman_collection(scan_id):
     }), 503
 
 
+@app.route('/api/scan/<scan_id>/http-requests', methods=['GET'])
+def generate_http_requests(scan_id):
+    """Generate .http/.req file for REST Client from scan endpoints."""
+    try:
+        format_type = request.args.get('format', 'http')  # http, burp
+        
+        with get_db() as db:
+            scan = ScanRepository.get_scan_by_id(db, scan_id)
+            if not scan:
+                return jsonify({'error': 'Scan not found'}), 404
+            
+            endpoints = ScanRepository.get_endpoints_by_scan_id(db, scan_id)
+            if not endpoints:
+                return jsonify({'error': 'No endpoints found'}), 404
+            
+            target_url = scan.target_url
+            
+            # Parse URL for Burp format
+            from urllib.parse import urlparse
+            parsed = urlparse(target_url)
+            host = parsed.netloc or 'localhost:5000'
+            scheme = parsed.scheme or 'http'
+            
+            # Generate Burp Suite format (Raw HTTP - multiple requests)
+            if format_type == 'burp':
+                burp_content = f"""# Shadow API Scanner - Burp Suite Raw HTTP Requests
+# Generated from Scan ID: {scan_id}
+# Target: {target_url}
+# Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+# 
+# Instructions:
+# 1. Copy each request block (between ===== separators)
+# 2. Paste into Burp Suite Repeater tab
+# 3. Modify and send as needed
+#
+# ============================================================
+
+"""
+                
+                # Group endpoints by method
+                endpoints_by_method = {}
+                for endpoint in endpoints:
+                    method = endpoint.method
+                    if method not in endpoints_by_method:
+                        endpoints_by_method[method] = []
+                    endpoints_by_method[method].append(endpoint)
+                
+                # Generate raw HTTP requests
+                for method in sorted(endpoints_by_method.keys()):
+                    burp_content += f"\n# ============ {method} Requests ============\n\n"
+                    
+                    for endpoint in endpoints_by_method[method]:
+                        url = endpoint.url
+                        
+                        burp_content += f"# {method} {url} (Status: {endpoint.status_code})\n"
+                        burp_content += "# " + "="*60 + "\n"
+                        
+                        # Request line
+                        burp_content += f"{method} {url} HTTP/1.1\r\n"
+                        burp_content += f"Host: {host}\r\n"
+                        
+                        # Headers
+                        if endpoint.request_headers:
+                            try:
+                                headers = json.loads(endpoint.request_headers) if isinstance(endpoint.request_headers, str) else endpoint.request_headers
+                                for key, value in headers.items():
+                                    if key.lower() not in ['host', 'content-length', 'connection']:
+                                        burp_content += f"{key}: {value}\r\n"
+                            except:
+                                pass
+                        
+                        # Content-Type and Body for POST/PUT/PATCH
+                        if method in ['POST', 'PUT', 'PATCH']:
+                            has_content_type = False
+                            if endpoint.request_headers:
+                                try:
+                                    headers = json.loads(endpoint.request_headers) if isinstance(endpoint.request_headers, str) else endpoint.request_headers
+                                    has_content_type = any(k.lower() == 'content-type' for k in headers.keys())
+                                except:
+                                    pass
+                            
+                            if not has_content_type:
+                                burp_content += "Content-Type: application/json\r\n"
+                            
+                            body = endpoint.request_body if endpoint.request_body else '{"key": "value"}'
+                            burp_content += f"Content-Length: {len(body)}\r\n"
+                            burp_content += "\r\n"
+                            burp_content += body
+                        else:
+                            burp_content += "\r\n"
+                        
+                        burp_content += "\n\n# " + "="*60 + "\n\n"
+                
+                return jsonify({
+                    'success': True,
+                    'content': burp_content,
+                    'filename': f'scan_{scan_id}_burp.txt',
+                    'format': 'burp'
+                })
+            
+            # Generate .http/.req content (default)
+            else:
+                http_content = f"""### Shadow API Scanner - Scan Results
+### Generated from Scan ID: {scan_id}
+### Target: {target_url}
+### Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+### ============================================================
+### Variables
+### ============================================================
+@baseUrl = {target_url}
+
+### ============================================================
+### Discovered Endpoints
+### ============================================================
+
+"""
+                
+                # Group endpoints by method
+                endpoints_by_method = {}
+                for endpoint in endpoints:
+                    method = endpoint.method
+                    if method not in endpoints_by_method:
+                        endpoints_by_method[method] = []
+                    endpoints_by_method[method].append(endpoint)
+                
+                # Generate requests for each method group
+                for method in sorted(endpoints_by_method.keys()):
+                    http_content += f"\n### {method} Requests\n###\n\n"
+                    
+                    for endpoint in endpoints_by_method[method]:
+                        url = endpoint.url
+                        # Clean URL
+                        if not url.startswith('http'):
+                            full_url = f"{{{{baseUrl}}}}{url}"
+                        else:
+                            full_url = url
+                        
+                        # Add comment with status code
+                        http_content += f"### {method} {url}\n"
+                        http_content += f"# Status: {endpoint.status_code}\n"
+                        
+                        # Add request
+                        http_content += f"{method} {full_url}\n"
+                        
+                        # Add headers if available
+                        if endpoint.request_headers:
+                            try:
+                                headers = json.loads(endpoint.request_headers) if isinstance(endpoint.request_headers, str) else endpoint.request_headers
+                                for key, value in headers.items():
+                                    if key.lower() not in ['host', 'content-length', 'connection']:
+                                        http_content += f"{key}: {value}\n"
+                            except:
+                                pass
+                        
+                        # Add body for POST/PUT/PATCH
+                        if method in ['POST', 'PUT', 'PATCH']:
+                            http_content += "Content-Type: application/json\n\n"
+                            if endpoint.request_body:
+                                http_content += f"{endpoint.request_body}\n"
+                            else:
+                                http_content += '{\n  "key": "value"\n}\n'
+                        
+                        http_content += "\n###\n\n"
+                
+                return jsonify({
+                    'success': True,
+                    'content': http_content,
+                    'filename': f'scan_{scan_id}.http',
+                    'format': 'http'
+                })
+            
+    except Exception as e:
+        print(f"[!] Error generating HTTP requests: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint."""
     return jsonify({'status': 'healthy', 'message': 'API server is running'})
+
+
+@app.route('/api/chat', methods=['POST'])
+def ai_chat():
+    """AI chat endpoint for discussing scan results."""
+    try:
+        data = request.get_json()
+        user_message = data.get('message', '')
+        scan_context = data.get('scan_context', {})
+        conversation_history = data.get('conversation_history', [])
+
+        if not user_message:
+            return jsonify({'error': 'Message is required'}), 400
+
+        # Check if OpenAI API key is available
+        openai_api_key = os.getenv('OPENAI_API_KEY')
+        if not openai_api_key:
+            return jsonify({
+                'response': '죄송합니다. AI 챗 기능을 사용하려면 OpenAI API 키가 필요합니다. 환경 변수 OPENAI_API_KEY를 설정해주세요.'
+            })
+
+        # Import OpenAI
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=openai_api_key)
+        except ImportError:
+            return jsonify({
+                'response': 'OpenAI 라이브러리가 설치되지 않았습니다. `pip install openai`를 실행해주세요.'
+            })
+
+        # Prepare enhanced system message with comprehensive scan context
+        stats = scan_context.get('statistics', {})
+        endpoint_samples = scan_context.get('endpoint_samples', {})
+        methods_dist = scan_context.get('methods_distribution', {})
+        
+        # Format endpoint samples for context with detailed request/response data
+        samples_text = ""
+        detailed_samples = []
+        
+        if endpoint_samples:
+            by_status = endpoint_samples.get('by_status', {})
+            sensitive = endpoint_samples.get('sensitive_endpoints', [])
+            
+            # Add detailed samples with request/response data
+            for status_type, endpoints in by_status.items():
+                for ep in endpoints[:2]:  # Top 2 per status type
+                    ep_detail = f"\n[{ep.get('method', 'GET')} {ep.get('url', '')}]"
+                    if ep.get('status_code'):
+                        ep_detail += f" → {ep.get('status_code')}"
+                    if ep.get('response_time'):
+                        ep_detail += f" ({ep.get('response_time')}ms)"
+                    if ep.get('request_body'):
+                        body_preview = ep.get('request_body', '')[:100]
+                        ep_detail += f"\n  요청: {body_preview}..."
+                    if ep.get('response_body'):
+                        resp_preview = ep.get('response_body', '')[:150]
+                        ep_detail += f"\n  응답: {resp_preview}..."
+                    detailed_samples.append(ep_detail)
+            
+            # Add URL-only summaries
+            if by_status.get('success_2xx'):
+                samples_text += f"\n성공(2xx): {len(by_status['success_2xx'])}개"
+            if by_status.get('client_error_4xx'):
+                samples_text += f"\n클라이언트 에러(4xx): {len(by_status['client_error_4xx'])}개"
+            if by_status.get('server_error_5xx'):
+                samples_text += f"\n서버 에러(5xx): {len(by_status['server_error_5xx'])}개"
+            if sensitive:
+                samples_text += f"\n⚠️ 민감 엔드포인트: {', '.join([ep.get('url', '') for ep in sensitive[:3]])}"
+        
+        # Combine detailed samples
+        if detailed_samples:
+            samples_text += "\n\n📋 상세 예시:" + "".join(detailed_samples[:5])
+        
+        methods_text = f"GET:{methods_dist.get('GET',0)} POST:{methods_dist.get('POST',0)} PUT:{methods_dist.get('PUT',0)} DELETE:{methods_dist.get('DELETE',0)}" if methods_dist else ""
+        
+        system_message = f"""당신은 API 보안 전문가입니다. 실제 HTTP 트래픽 데이터를 기반으로 구체적이고 실용적인 분석을 제공하세요.
+
+📊 스캔 결과:
+- URL: {scan_context.get('target_url', 'N/A')}
+- 엔드포인트: {scan_context.get('total_endpoints', 0)}개
+- 상태: 2xx({stats.get('count_2xx', 0)}) 3xx({stats.get('count_3xx', 0)}) 4xx({stats.get('count_4xx', 0)}) 5xx({stats.get('count_5xx', 0)})
+- HTTP 메서드: {methods_text}
+- 발견 경로: {scan_context.get('discovered_paths_count', 0)}개{samples_text}
+
+📋 분석 가이드:
+1. 실제 요청/응답 데이터에서 보안 취약점 식별
+2. 요청 body에서 민감 정보 노출 확인
+3. 응답 데이터에서 정보 유출 위험 평가
+4. HTTP 헤더 보안 설정 점검
+5. 응답 시간으로 성능 이슈 파악
+6. 구체적인 개선 권장사항 제공
+
+위의 상세 예시에 있는 실제 요청/응답 내용을 참조하여 답변하세요."""
+
+        # Prepare messages for OpenAI (optimized - only last 4 messages for faster response)
+        messages = [
+            {"role": "system", "content": system_message}
+        ]
+
+        # Add conversation history (last 4 messages only for performance)
+        for msg in conversation_history[-4:]:
+            if msg.get('content'):  # Skip empty messages
+                messages.append({
+                    "role": msg.get('role', 'user'),
+                    "content": msg.get('content', '')
+                })
+
+        # Add current user message
+        messages.append({
+            "role": "user",
+            "content": user_message
+        })
+
+        # Call OpenAI API (optimized with GPT-3.5-turbo for faster response)
+        try:
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",  # Faster and cheaper than GPT-4
+                messages=messages,
+                temperature=0.3,  # Lower temperature for more focused, accurate responses
+                max_tokens=1000,  # Increased for more detailed analysis
+                timeout=30  # 30 second timeout
+            )
+
+            assistant_message = response.choices[0].message.content
+
+            return jsonify({
+                'response': assistant_message,
+                'model': 'gpt-3.5-turbo'
+            })
+
+        except Exception as e:
+            error_str = str(e)
+            print(f"[!] OpenAI API error: {error_str}")
+            
+            # Handle specific error types
+            if 'authentication' in error_str.lower() or 'api key' in error_str.lower():
+                return jsonify({
+                    'response': 'OpenAI API 키가 유효하지 않습니다. API 키를 확인해주세요.'
+                })
+            elif 'rate limit' in error_str.lower() or 'quota' in error_str.lower():
+                return jsonify({
+                    'response': 'OpenAI API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.'
+                })
+            else:
+                return jsonify({
+                    'response': f'AI 응답 생성 중 오류가 발생했습니다: {error_str}'
+                })
+
+    except Exception as e:
+        print(f"[!] Chat error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to process chat message', 'details': str(e)}), 500
 
 
 if __name__ == '__main__':

@@ -1,0 +1,15 @@
+# Ignore everything by default.
+*
+
+# Keep repository metadata for GitHub.
+!/.gitignore
+!/README.md
+
+# Keep only the files required to run the app.
+!/pyproject.toml
+!/app.py
+!/route_api_discovery.py
+!/route_api_discovery_qt.py
+!/GUI/
+!/GUI/__init__.py
+!/GUI/launcher.py

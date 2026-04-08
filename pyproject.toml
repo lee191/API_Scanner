@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "route-api-discovery"
+version = "0.1.0"
+description = "URL에서 JS를 수집해 페이지 경로와 API 엔드포인트를 탐색하는 도구"
+requires-python = ">=3.10"
+dependencies = [
+  "PySide6>=6.7",
+]
+authors = [
+  { name = "Codex" }
+]
+
+[project.scripts]
+route-api-discovery-gui = "app:main"
+
+[tool.setuptools]
+packages = ["GUI"]
+py-modules = ["app", "route_api_discovery", "route_api_discovery_qt"]

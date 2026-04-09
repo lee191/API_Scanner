@@ -64,6 +64,21 @@ ASSET_EXTENSIONS = {
 }
 STATIC_PREFIXES = ("/_next/", "/static/", "/assets/", "/public/", "/images/", "/img/", "/fonts/")
 JS_HINT_PREFIXES = ("/_next/", "/static/", "/assets/")
+COMMON_COUNTRY_CODE_SECOND_LEVEL_LABELS = {
+    "ac",
+    "co",
+    "com",
+    "edu",
+    "go",
+    "gov",
+    "gr",
+    "mil",
+    "ne",
+    "net",
+    "or",
+    "org",
+    "re",
+}
 URL_SCHEME_ONLY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+\-.]*:(?:/*)?$")
 INVALID_URL_CHARS_RE = re.compile(r"[\x00-\x20<>{}|\\]")
 QUOTED_PATH_RE = re.compile(
@@ -501,9 +516,30 @@ def get_origin_key(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def get_site_hostname_key(hostname: str) -> str:
+    host = (hostname or "").strip().strip(".").lower()
+    if not host:
+        return ""
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return host
+    if host == "localhost":
+        return host
+
+    labels = [label for label in host.split(".") if label]
+    if len(labels) <= 2:
+        return ".".join(labels)
+    if len(labels[-1]) == 2 and labels[-2] in COMMON_COUNTRY_CODE_SECOND_LEVEL_LABELS:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
 def get_domain_key(url: str) -> str:
     parsed = urlparse(url)
-    return (parsed.hostname or parsed.netloc).lower()
+    return get_site_hostname_key(parsed.hostname or parsed.netloc)
 
 
 def read_response_text(response) -> str:
@@ -670,7 +706,9 @@ def extract_html_assets(html: str, page_url: str, root_domain: str) -> Tuple[Lis
     script_urls: List[str] = []
     for script_src in parser.script_srcs:
         absolute = resolve_absolute_url(page_url, script_src)
-        if absolute and get_domain_key(absolute) == root_domain and should_follow_js(absolute):
+        # Anything declared in <script src> should be treated as a JS fetch
+        # target, even when the URL itself omits a .js suffix.
+        if absolute and get_domain_key(absolute) == root_domain:
             script_urls.append(absolute)
     return script_urls, parser.inline_scripts
 
@@ -1037,6 +1075,7 @@ def _discover_once(
     discovered_js_urls: Set[str] = set()
     visited_scripts: Set[str] = set()
     fetched_scripts: List[dict] = []
+    successful_js_fetches = 0
     queue: Deque[Tuple[str, int]] = deque()
 
     script_urls, inline_scripts = extract_html_assets(html_result.text, root_url, root_domain)
@@ -1067,7 +1106,7 @@ def _discover_once(
             api_bucket=api_bucket,
         )
 
-    while queue and len(fetched_scripts) < config.max_js_files:
+    while queue and successful_js_fetches < config.max_js_files:
         ensure_not_cancelled(execution)
         script_url, depth = queue.popleft()
         if depth > config.max_depth or script_url in visited_scripts:
@@ -1077,7 +1116,7 @@ def _discover_once(
             continue
 
         visited_scripts.add(script_url)
-        emit_progress(progress, f"JS 가져오는 중 {len(fetched_scripts) + 1}/{config.max_js_files}: {script_url}")
+        emit_progress(progress, f"JS 가져오는 중 {successful_js_fetches + 1}/{config.max_js_files}: {script_url}")
         js_result = fetch_text(script_url, timeout=config.timeout, method="GET", headers=config.headers, execution=execution, verify_ssl=config.verify_ssl)
         fetched_scripts.append(
             {
@@ -1094,6 +1133,7 @@ def _discover_once(
         # later recursive targets can retry transient failures.
         if js_result.success:
             state.known_js_urls.add(script_url)
+            successful_js_fetches += 1
 
         if not js_result.success or not js_result.text:
             continue

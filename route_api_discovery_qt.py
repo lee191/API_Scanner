@@ -47,6 +47,7 @@ from route_api_discovery import (
     build_summary_text,
     discover_many,
     filter_table_rows,
+    parse_hostname_filters,
     parse_header_lines,
     parse_input_urls,
     save_result,
@@ -74,6 +75,9 @@ UI_TEXTS = {
         "options": "탐색 옵션",
         "timeout_suffix": " 초",
         "recursive_scan": "재귀탐색 사용",
+        "include_subdomains": "서브도메인 포함",
+        "excluded_subdomains": "제외할 서브도메인",
+        "excluded_subdomains_placeholder": "예: cdn.example.com, static.example.com",
         "skip_probe": "프로브 생략",
         "verify_ssl": "SSL 인증서 검증",
         "max_js": "JS 최대 개수",
@@ -182,6 +186,9 @@ UI_TEXTS = {
         "options": "Scan options",
         "timeout_suffix": " sec",
         "recursive_scan": "Enable recursive scan",
+        "include_subdomains": "Include subdomains",
+        "excluded_subdomains": "Excluded subdomains",
+        "excluded_subdomains_placeholder": "Example: cdn.example.com, static.example.com",
         "skip_probe": "Skip probe",
         "verify_ssl": "Verify SSL certificate",
         "max_js": "Max JS files",
@@ -590,6 +597,9 @@ class DiscoveryWindow(QMainWindow):
         self.timeout_spin.setSuffix(self.tr("timeout_suffix"))
         self.request_delay_spin.setSuffix(self.tr("timeout_suffix"))
         self.recursive_scan_check.setText(self.tr("recursive_scan"))
+        self.include_subdomains_check.setText(self.tr("include_subdomains"))
+        self.excluded_subdomains_label.setText(self.tr("excluded_subdomains"))
+        self.excluded_subdomains_input.setPlaceholderText(self.tr("excluded_subdomains_placeholder"))
         self.skip_probe_check.setText(self.tr("skip_probe"))
         self.verify_ssl_check.setText(self.tr("verify_ssl"))
 
@@ -732,6 +742,10 @@ class DiscoveryWindow(QMainWindow):
         self.timeout_spin.setSingleStep(1.0)
         self.timeout_spin.setValue(15.0)
         self.recursive_scan_check = QCheckBox(option_card)
+        self.include_subdomains_check = QCheckBox(option_card)
+        self.include_subdomains_check.setChecked(True)
+        self.excluded_subdomains_label = QLabel(option_card)
+        self.excluded_subdomains_input = QLineEdit(option_card)
         self.recursive_depth_spin = NoScrollSpinBox(option_card)
         self.recursive_depth_spin.setRange(0, 10)
         self.recursive_depth_spin.setValue(1)
@@ -765,16 +779,19 @@ class DiscoveryWindow(QMainWindow):
         grid.addWidget(self.timeout_label, 2, 0)
         grid.addWidget(self.timeout_spin, 2, 1)
         grid.addWidget(self.recursive_scan_check, 3, 0, 1, 2)
-        grid.addWidget(self.recursive_depth_label, 4, 0)
-        grid.addWidget(self.recursive_depth_spin, 4, 1)
-        grid.addWidget(self.skip_probe_check, 5, 0, 1, 2)
-        grid.addWidget(self.verify_ssl_check, 6, 0, 1, 2)
-        grid.addWidget(self.max_workers_label, 7, 0)
-        grid.addWidget(self.max_workers_spin, 7, 1)
-        grid.addWidget(self.request_delay_label, 8, 0)
-        grid.addWidget(self.request_delay_spin, 8, 1)
-        grid.addWidget(self.language_label, 9, 0)
-        grid.addWidget(self.language_combo, 9, 1)
+        grid.addWidget(self.include_subdomains_check, 4, 0, 1, 2)
+        grid.addWidget(self.excluded_subdomains_label, 5, 0)
+        grid.addWidget(self.excluded_subdomains_input, 5, 1)
+        grid.addWidget(self.recursive_depth_label, 6, 0)
+        grid.addWidget(self.recursive_depth_spin, 6, 1)
+        grid.addWidget(self.skip_probe_check, 7, 0, 1, 2)
+        grid.addWidget(self.verify_ssl_check, 8, 0, 1, 2)
+        grid.addWidget(self.max_workers_label, 9, 0)
+        grid.addWidget(self.max_workers_spin, 9, 1)
+        grid.addWidget(self.request_delay_label, 10, 0)
+        grid.addWidget(self.request_delay_spin, 10, 1)
+        grid.addWidget(self.language_label, 11, 0)
+        grid.addWidget(self.language_combo, 11, 1)
         option_layout.addLayout(grid)
         self.left_layout.addWidget(option_card)
 
@@ -1454,6 +1471,7 @@ class DiscoveryWindow(QMainWindow):
         try:
             urls = parse_input_urls(self.url_input.toPlainText())
             headers = parse_header_lines(self.header_input.toPlainText())
+            excluded_subdomains = parse_hostname_filters([self.excluded_subdomains_input.text()])
             output_raw = self.output_input.text().strip() or "discovery-result.json"
             output_path = Path(output_raw)
             request = ScanRequest(
@@ -1467,6 +1485,8 @@ class DiscoveryWindow(QMainWindow):
                     skip_probe=self.skip_probe_check.isChecked(),
                     recursive_scan=self.recursive_scan_check.isChecked(),
                     recursive_depth=self.recursive_depth_spin.value(),
+                    include_subdomains=self.include_subdomains_check.isChecked(),
+                    excluded_subdomains=excluded_subdomains,
                     max_workers=self.max_workers_spin.value(),
                     request_delay=self.request_delay_spin.value(),
                     headers=headers,

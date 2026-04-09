@@ -34,6 +34,7 @@ DEFAULT_REQUEST_HEADERS = {
 SUPPORTED_OUTPUT_SUFFIXES = {"", ".json", ".xlsx"}
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+HOSTNAME_LABEL_RE = re.compile(r"^[A-Za-z0-9-]+$")
 ASSET_EXTENSIONS = {
     ".js",
     ".mjs",
@@ -119,6 +120,8 @@ class Config:
     skip_probe: bool
     recursive_scan: bool = False
     recursive_depth: int = 1
+    include_subdomains: bool = True
+    excluded_subdomains: Tuple[str, ...] = ()
     max_workers: int = 1
     request_delay: float = 0.0
     headers: Dict[str, str] = field(default_factory=dict)
@@ -176,6 +179,14 @@ class Candidate:
     path: str
     kind: str
     sources: Set[str] = field(default_factory=set)
+
+
+@dataclass(frozen=True)
+class UrlScope:
+    hostname: str
+    site_hostname: str
+    include_subdomains: bool = True
+    excluded_hostnames: Tuple[str, ...] = ()
 
 
 @dataclass
@@ -237,6 +248,19 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--skip-probe", action="store_true", help="추출된 경로의 접근성 확인을 건너뜁니다.")
     parser.add_argument("--recursive-scan", action="store_true", help="접근 가능한 페이지(200)를 대상으로 재귀 탐색을 수행합니다.")
     parser.add_argument("--recursive-depth", type=int, default=1, help="재귀 탐색 단계(기본값: 1)")
+    parser.add_argument(
+        "--include-subdomains",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="동일 사이트의 서브도메인까지 스캔 범위에 포함합니다(기본값: 사용, `--no-include-subdomains`로 해제).",
+    )
+    parser.add_argument(
+        "--exclude-subdomains",
+        action="append",
+        default=[],
+        metavar="HOST[,HOST...]",
+        help="탐색에서 제외할 서브도메인 호스트 목록입니다. 쉼표로 여러 개를 입력할 수 있습니다.",
+    )
 
     parser.add_argument("--max-workers", type=int, default=1, help="동시에 처리할 최대 요청 작업 수(기본값: 1)")
     parser.add_argument("--request-delay", type=float, default=0.0, help="요청 시작 간 최소 딜레이(초, 기본값: 0)")
@@ -259,6 +283,8 @@ def build_config(args: argparse.Namespace) -> Config:
         skip_probe=args.skip_probe,
         recursive_scan=args.recursive_scan,
         recursive_depth=max(0, args.recursive_depth),
+        include_subdomains=bool(args.include_subdomains),
+        excluded_subdomains=parse_hostname_filters(args.exclude_subdomains),
         max_workers=max(1, args.max_workers),
         request_delay=max(0.0, args.request_delay),
         verify_ssl=not args.no_verify_ssl,
@@ -324,6 +350,36 @@ def parse_header_lines(text: str) -> Dict[str, str]:
     return headers
 
 
+def parse_hostname_filters(values: Optional[Sequence[str]]) -> Tuple[str, ...]:
+    if not values:
+        return ()
+
+    hostnames: List[str] = []
+    seen: Set[str] = set()
+    for raw_value in values:
+        for token in re.split(r"[\s,;]+", str(raw_value or "").strip()):
+            if not token:
+                continue
+
+            normalized = normalize_hostname(token)
+            if normalized.startswith("*."):
+                normalized = normalized[2:]
+            if not normalized:
+                continue
+            if any(character in normalized for character in ("://", "/", "?", "#", "@", ":")):
+                raise ValueError(f"제외할 서브도메인은 호스트명만 입력해 주세요: {token}")
+
+            labels = normalized.split(".")
+            if any(not label or label.startswith("-") or label.endswith("-") or not HOSTNAME_LABEL_RE.fullmatch(label) for label in labels):
+                raise ValueError(f"제외할 서브도메인 형식이 올바르지 않습니다: {token}")
+
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            hostnames.append(normalized)
+    return tuple(hostnames)
+
+
 def parse_input_urls(text: str) -> List[str]:
     urls: List[str] = []
     seen: Set[str] = set()
@@ -366,6 +422,8 @@ def build_empty_scan_result(config: Config, url: str, error: str, status: str = 
         "scanned_at": scanned_at,
         "origin": get_origin_key(url),
         "probe_skipped": config.skip_probe,
+        "include_subdomains": config.include_subdomains,
+        "excluded_subdomains": list(config.excluded_subdomains),
         "max_js_files": config.max_js_files,
         "max_depth": config.max_depth,
         "max_workers": config.max_workers,
@@ -435,6 +493,8 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
         "input_urls": input_urls,
         "scanned_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "probe_skipped": config.skip_probe,
+        "include_subdomains": config.include_subdomains,
+        "excluded_subdomains": list(config.excluded_subdomains),
         "recursive_enabled": config.recursive_scan,
         "recursive_depth": config.recursive_depth if config.recursive_scan else 0,
         "max_js_files": config.max_js_files,
@@ -516,8 +576,17 @@ def get_origin_key(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def normalize_hostname(hostname: str) -> str:
+    return (hostname or "").strip().strip(".").lower()
+
+
+def get_hostname_key(url: str) -> str:
+    parsed = urlparse(url)
+    return normalize_hostname(parsed.hostname or parsed.netloc)
+
+
 def get_site_hostname_key(hostname: str) -> str:
-    host = (hostname or "").strip().strip(".").lower()
+    host = normalize_hostname(hostname)
     if not host:
         return ""
     try:
@@ -538,8 +607,45 @@ def get_site_hostname_key(hostname: str) -> str:
 
 
 def get_domain_key(url: str) -> str:
-    parsed = urlparse(url)
-    return get_site_hostname_key(parsed.hostname or parsed.netloc)
+    return get_site_hostname_key(get_hostname_key(url))
+
+
+def build_url_scope(
+    url: str,
+    include_subdomains: bool = True,
+    excluded_hostnames: Sequence[str] = (),
+) -> UrlScope:
+    hostname = get_hostname_key(url)
+    return UrlScope(
+        hostname=hostname,
+        site_hostname=get_site_hostname_key(hostname),
+        include_subdomains=include_subdomains,
+        excluded_hostnames=tuple(normalize_hostname(item) for item in excluded_hostnames if normalize_hostname(item)),
+    )
+
+
+def is_hostname_excluded(hostname: str, excluded_hostnames: Sequence[str]) -> bool:
+    normalized = normalize_hostname(hostname)
+    if not normalized:
+        return False
+    for excluded in excluded_hostnames:
+        blocked = normalize_hostname(excluded)
+        if not blocked:
+            continue
+        if normalized == blocked or normalized.endswith(f".{blocked}"):
+            return True
+    return False
+
+
+def url_matches_scope(url: str, scope: UrlScope) -> bool:
+    hostname = get_hostname_key(url)
+    if not hostname:
+        return False
+    if hostname != scope.hostname and is_hostname_excluded(hostname, scope.excluded_hostnames):
+        return False
+    if scope.include_subdomains:
+        return get_site_hostname_key(hostname) == scope.site_hostname
+    return hostname == scope.hostname
 
 
 def read_response_text(response) -> str:
@@ -665,7 +771,7 @@ def collect_path_candidates(
     text: str,
     base_url: str,
     source_label: str,
-    root_domain: str,
+    scope: UrlScope,
     page_bucket: Dict[str, Candidate],
     api_bucket: Dict[str, Candidate],
 ) -> None:
@@ -674,7 +780,7 @@ def collect_path_candidates(
         absolute = resolve_absolute_url(base_url, raw_value)
         if not absolute:
             continue
-        if get_domain_key(absolute) != root_domain:
+        if not url_matches_scope(absolute, scope):
             continue
         path = normalize_path(absolute)
         if path == "/" or is_static_asset(path):
@@ -691,7 +797,7 @@ def collect_path_candidates(
             absolute = resolve_absolute_url(base_url, raw_value)
             if not absolute:
                 continue
-            if get_domain_key(absolute) != root_domain:
+            if not url_matches_scope(absolute, scope):
                 continue
             path = normalize_path(absolute)
             if is_static_asset(path):
@@ -699,7 +805,7 @@ def collect_path_candidates(
             add_candidate(api_bucket, absolute, source_label, "api")
 
 
-def extract_html_assets(html: str, page_url: str, root_domain: str) -> Tuple[List[str], List[str]]:
+def extract_html_assets(html: str, page_url: str, scope: UrlScope) -> Tuple[List[str], List[str]]:
     parser = ScriptHtmlParser()
     parser.feed(html)
 
@@ -708,18 +814,18 @@ def extract_html_assets(html: str, page_url: str, root_domain: str) -> Tuple[Lis
         absolute = resolve_absolute_url(page_url, script_src)
         # Anything declared in <script src> should be treated as a JS fetch
         # target, even when the URL itself omits a .js suffix.
-        if absolute and get_domain_key(absolute) == root_domain:
+        if absolute and url_matches_scope(absolute, scope):
             script_urls.append(absolute)
     return script_urls, parser.inline_scripts
 
 
-def extract_additional_js_urls(script_text: str, source_url: str, root_domain: str) -> List[str]:
+def extract_additional_js_urls(script_text: str, source_url: str, scope: UrlScope) -> List[str]:
     discovered: List[str] = []
     for pattern in JS_IMPORT_RE_LIST:
         for match in pattern.finditer(script_text):
             raw_value = match.group("value").strip()
             absolute = resolve_absolute_url(source_url, raw_value)
-            if absolute and get_domain_key(absolute) == root_domain and should_follow_js(absolute):
+            if absolute and url_matches_scope(absolute, scope) and should_follow_js(absolute):
                 discovered.append(absolute)
     return discovered
 
@@ -965,6 +1071,8 @@ def apply_recursive_metadata(
     scan_records: List[dict],
 ) -> dict:
     enriched = dict(result)
+    enriched["include_subdomains"] = config.include_subdomains
+    enriched["excluded_subdomains"] = list(config.excluded_subdomains)
     enriched["recursive_enabled"] = config.recursive_scan
     enriched["recursive_depth"] = config.recursive_depth if config.recursive_scan else 0
     enriched["recursive_scanned_targets"] = list(state.scanned_target_urls)
@@ -1030,6 +1138,8 @@ def combine_recursive_scan_results(
         "scanned_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "origin": get_origin_key(root_url),
         "probe_skipped": config.skip_probe,
+        "include_subdomains": config.include_subdomains,
+        "excluded_subdomains": list(config.excluded_subdomains),
         "max_js_files": config.max_js_files,
         "max_depth": config.max_depth,
         "max_workers": config.max_workers,
@@ -1063,7 +1173,11 @@ def _discover_once(
 
     root_url = target_url
     root_origin = get_origin_key(root_url)
-    root_domain = get_domain_key(root_url)
+    scope = build_url_scope(
+        root_url,
+        include_subdomains=config.include_subdomains,
+        excluded_hostnames=config.excluded_subdomains,
+    )
 
     emit_progress(progress, f"시작 문서를 가져오는 중: {root_url}")
     html_result = fetch_text(root_url, timeout=config.timeout, method="GET", headers=config.headers, execution=execution, verify_ssl=config.verify_ssl)
@@ -1078,7 +1192,7 @@ def _discover_once(
     successful_js_fetches = 0
     queue: Deque[Tuple[str, int]] = deque()
 
-    script_urls, inline_scripts = extract_html_assets(html_result.text, root_url, root_domain)
+    script_urls, inline_scripts = extract_html_assets(html_result.text, root_url, scope)
     emit_progress(progress, f"연결된 스크립트 {len(script_urls)}개와 인라인 스크립트 {len(inline_scripts)}개를 찾았습니다.")
     for script_url in script_urls:
         discovered_js_urls.add(script_url)
@@ -1091,7 +1205,7 @@ def _discover_once(
         text=html_result.text,
         base_url=root_url,
         source_label=f"html:{root_url}",
-        root_domain=root_domain,
+        scope=scope,
         page_bucket=page_bucket,
         api_bucket=api_bucket,
     )
@@ -1101,7 +1215,7 @@ def _discover_once(
             text=inline_script,
             base_url=root_url,
             source_label=f"inline-script:{root_url}",
-            root_domain=root_domain,
+            scope=scope,
             page_bucket=page_bucket,
             api_bucket=api_bucket,
         )
@@ -1142,12 +1256,12 @@ def _discover_once(
             text=js_result.text,
             base_url=script_url,
             source_label=f"js:{script_url}",
-            root_domain=root_domain,
+            scope=scope,
             page_bucket=page_bucket,
             api_bucket=api_bucket,
         )
 
-        for child_url in extract_additional_js_urls(js_result.text, script_url, root_domain):
+        for child_url in extract_additional_js_urls(js_result.text, script_url, scope):
             discovered_js_urls.add(child_url)
             if child_url in state.known_js_urls:
                 state.skipped_js_duplicates += 1
@@ -1228,7 +1342,11 @@ def discover(config: Config, progress: ProgressCallback = None, execution: Optio
     execution_context = execution or build_execution_context(config)
     state = RecursiveDiscoveryState()
     max_recursive_depth = config.recursive_depth if config.recursive_scan else 0
-    root_domain = get_domain_key(config.url)
+    recursive_scope = build_url_scope(
+        config.url,
+        include_subdomains=config.include_subdomains,
+        excluded_hostnames=config.excluded_subdomains,
+    )
     queue: Deque[Tuple[str, int]] = deque([(config.url, 0)])
     successful_results: List[Tuple[str, int, dict]] = []
     failed_targets: List[dict] = []
@@ -1275,7 +1393,7 @@ def discover(config: Config, progress: ProgressCallback = None, execution: Optio
             if item.get("status_code") != 200:
                 continue
             next_url = item.get("url")
-            if not next_url or get_domain_key(next_url) != root_domain:
+            if not next_url or not url_matches_scope(next_url, recursive_scope):
                 continue
 
             next_path = normalize_path(next_url)
@@ -1312,6 +1430,8 @@ def discover_many(config: Config, urls: List[str], progress: ProgressCallback = 
             skip_probe=config.skip_probe,
             recursive_scan=config.recursive_scan,
             recursive_depth=config.recursive_depth,
+            include_subdomains=config.include_subdomains,
+            excluded_subdomains=tuple(config.excluded_subdomains),
             max_workers=config.max_workers,
             request_delay=config.request_delay,
             headers=dict(config.headers),
@@ -1403,6 +1523,7 @@ def build_batch_workbook_sheets(batch_result: dict, output_path: Path) -> List[S
 def build_batch_summary_lines(batch_result: dict, output_path: Path) -> List[str]:
     summary = batch_result["summary"]
     dedupe = summary.get("recursive_dedupe") or {}
+    excluded_subdomains = ", ".join(batch_result.get("excluded_subdomains", []) or []) or "-"
     lines = [
         "=== 배치 요약 ===",
         f"입력 URL 개수: {summary['input_url_count']}",
@@ -1414,6 +1535,8 @@ def build_batch_summary_lines(batch_result: dict, output_path: Path) -> List[str
         f"API 후보 합계: {summary['api_count']}",
         f"동시 요청 수: {int(batch_result.get('max_workers', 1) or 1)}",
         f"요청 딜레이(초): {float(batch_result.get('request_delay', 0.0) or 0.0):g}",
+        f"서브도메인 포함: {'사용' if batch_result.get('include_subdomains', True) else '미사용'}",
+        f"제외 서브도메인: {excluded_subdomains}",
         f"재귀 탐색: {'사용' if batch_result.get('recursive_enabled') else '미사용'}",
         f"재귀 단계: {int(batch_result.get('recursive_depth', 0) or 0)}",
         f"재귀 스캔 대상 합계: {int(summary.get('recursive_total_scans', 0) or 0)}",
@@ -1758,6 +1881,7 @@ def filter_table_rows(
 def build_summary_lines(result: dict, output_path: Path, language: str = "ko") -> List[str]:
     language = _normalize_language(language)
     summary = result["summary"]
+    excluded_subdomains = ", ".join(result.get("excluded_subdomains", []) or []) or "-"
     lines = [
         _localized_text(language, "=== 요약 ===", "=== Summary ==="),
         f"{_localized_text(language, '입력 URL', 'Input URL')}: {result['input_url']}",
@@ -1778,6 +1902,8 @@ def build_summary_lines(result: dict, output_path: Path, language: str = "ko") -
             f"{_localized_text(language, '동시 요청 수', 'Max workers')}: {int(result.get('max_workers', 1) or 1)}",
             f"{_localized_text(language, '요청 딜레이(초)', 'Request delay (sec)')}: {float(result.get('request_delay', 0.0) or 0.0):g}",
             f"{_localized_text(language, '프로브 생략 여부', 'Probe skipped')}: {_format_yes_no_label(bool(result['probe_skipped']), language)}",
+            f"{_localized_text(language, '서브도메인 포함', 'Include subdomains')}: {_format_enabled_label(bool(result.get('include_subdomains', True)), language)}",
+            f"{_localized_text(language, '제외 서브도메인', 'Excluded subdomains')}: {excluded_subdomains}",
             f"{_localized_text(language, '재귀 탐색', 'Recursive scan')}: {_format_enabled_label(bool(result.get('recursive_enabled')), language)}",
             f"{_localized_text(language, '재귀 단계', 'Recursive depth')}: {int(result.get('recursive_depth', 0) or 0)}",
             f"{_localized_text(language, '재귀 스캔 대상 수', 'Recursive scanned targets')}: {int(result.get('recursive_total_scans', 1) or 1)}",

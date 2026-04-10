@@ -22,7 +22,7 @@ from typing import Callable, Deque, Dict, Iterable, List, Optional, Sequence, Se
 import ssl
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener, urlopen
 from xml.sax.saxutils import escape as xml_escape
 
 
@@ -101,6 +101,100 @@ API_PATTERN_RE_LIST = (
 )
 SCRIPT_BLOCK_RE = re.compile(r"<script\b(?P<attrs>[^>]*)>(?P<body>.*?)</script\s*>", re.IGNORECASE | re.DOTALL)
 SCRIPT_SRC_RE = re.compile(r"""\bsrc\s*=\s*(?P<quote>["']?)(?P<value>[^"' >]+)(?P=quote)""", re.IGNORECASE)
+HARD_CODED_EMAIL_RE = re.compile(
+    r"(?<![\w.+-])(?P<value>[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,24})(?![\w.-])"
+)
+HARD_CODED_PHONE_RE = re.compile(
+    r"(?<![\w@])(?P<value>(?:\+82[-.\s]?)?0?(?:10|11|16|17|18|19|2|31|32|33|41|42|43|44|51|52|53|54|55|61|62|63|64|70)"
+    r"(?:[-.\s]?\d{3,4})[-.\s]?\d{4}|(?:\+|00)\d{1,3}(?:[-.\s]?\(?\d{1,4}\)?){2,5})(?!\w)"
+)
+HARD_CODED_KEY_VALUE_RE = re.compile(
+    r"""(?:(?P<kq>["'`])?(?P<key>[A-Za-z_][A-Za-z0-9_]*)(?P=kq)?)\s*[:=]\s*(?P<vq>["'`])(?P<value>[^"'`\r\n]{0,256}?)(?P=vq)""",
+    re.IGNORECASE,
+)
+HARD_CODED_EMAIL_PLACEHOLDER_DOMAINS = {
+    "example.com",
+    "example.org",
+    "example.net",
+    "test.com",
+    "sample.com",
+    "invalid",
+    "localhost",
+    "local",
+}
+HARD_CODED_PLACEHOLDER_VALUES = {
+    "",
+    "test",
+    "sample",
+    "dummy",
+    "example",
+    "guest",
+    "admin",
+    "user",
+    "root",
+    "changeme",
+    "your_password",
+    "password",
+    "000000",
+    "00000000",
+    "0000000000",
+    "000-0000-0000",
+    "010-0000-0000",
+    "test@test.com",
+    "your@email.com",
+    "noreply@example.com",
+}
+HARD_CODED_DYNAMIC_VALUE_MARKERS = (
+    "${",
+    "{{",
+    "process.env",
+    "import.meta.env",
+    "window.__env",
+    "window.__ENV",
+    "config.",
+)
+HARD_CODED_NAME_KEYS = {
+    "fullname",
+    "displayname",
+    "contactname",
+    "ownername",
+    "managername",
+}
+HARD_CODED_ACCOUNT_ID_KEYS = {
+    "accountid",
+    "account_id",
+    "memberid",
+    "customerid",
+    "employeeid",
+}
+HARD_CODED_USER_ID_KEYS = {
+    "userid",
+    "user_id",
+    "loginid",
+    "login_id",
+    "username",
+    "login",
+}
+HARD_CODED_CREDENTIAL_KEYS = {"password", "passwd", "pwd", "pin"}
+HARD_CODED_TOKEN_KEYS = {
+    "token",
+    "accesstoken",
+    "refreshtoken",
+    "apikey",
+    "api_key",
+    "secret",
+    "clientsecret",
+    "authorization",
+    "bearer",
+}
+HARD_CODED_EMAIL_KEYS = {"email", "loginemail", "contactemail"}
+HARD_CODED_PHONE_KEYS = {"phone", "mobile", "tel", "telephone", "contactphone"}
+HARD_CODED_PII_CATEGORIES = {"email", "phone", "person_name", "account_id", "user_id"}
+HARD_CODED_SECRET_CATEGORIES = {"credential", "token"}
+HARD_CODED_ALL_CATEGORIES = ("email", "phone", "person_name", "account_id", "user_id", "credential", "token")
+HARD_CODED_SEVERITY_LEVELS = ("critical", "high", "medium", "low")
+HARD_CODED_LINE_CONTEXT_RADIUS = 60
+HARD_CODED_PHONE_CONTEXT_HINTS = ("phone", "mobile", "tel", "contact", "call")
 
 ProgressCallback = Optional[Callable[[str], None]]
 CANCEL_MESSAGE = "사용자 요청으로 스캔을 중지했습니다."
@@ -126,6 +220,7 @@ class Config:
     request_delay: float = 0.0
     headers: Dict[str, str] = field(default_factory=dict)
     verify_ssl: bool = True
+    proxy_url: str = ""
 
 
 @dataclass
@@ -264,6 +359,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
     parser.add_argument("--max-workers", type=int, default=1, help="동시에 처리할 최대 요청 작업 수(기본값: 1)")
     parser.add_argument("--request-delay", type=float, default=0.0, help="요청 시작 간 최소 딜레이(초, 기본값: 0)")
+    parser.add_argument("--proxy", type=str, default="", help="프록시 URL(http://host:port 또는 https://host:port)")
     parser.add_argument("--no-verify-ssl", action="store_true", help="SSL 인증서 검증을 건너뜁니다(자체 서명 인증서 허용).")
     parser.add_argument("--debug", action="store_true", help="오류 발생 시 traceback을 함께 출력합니다.")
 
@@ -288,6 +384,7 @@ def build_config(args: argparse.Namespace) -> Config:
         max_workers=max(1, args.max_workers),
         request_delay=max(0.0, args.request_delay),
         verify_ssl=not args.no_verify_ssl,
+        proxy_url=str(args.proxy or "").strip(),
     )
     validate_config(config)
     return config
@@ -304,6 +401,7 @@ def validate_config(config: Config) -> None:
         raise ValueError("동시 요청 수는 32 이하로 설정해 주세요.")
     if config.request_delay < 0:
         raise ValueError("요청 딜레이는 0 이상이어야 합니다.")
+    validate_proxy_url(config.proxy_url)
     validate_output_path(config.output)
 
 
@@ -311,6 +409,15 @@ def validate_output_path(output: Path) -> None:
     suffix = output.suffix.lower()
     if suffix not in SUPPORTED_OUTPUT_SUFFIXES:
         raise ValueError("지원하지 않는 출력 형식입니다. `.json`, `.xlsx`, 또는 확장자 없이 입력해 주세요.")
+
+
+def validate_proxy_url(proxy_url: str) -> None:
+    value = str(proxy_url or "").strip()
+    if not value:
+        return
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
+        raise ValueError("프록시 URL은 `http://host:port` 또는 `https://host:port` 형식이어야 합니다.")
 
 
 def build_execution_context(config: Config) -> ExecutionContext:
@@ -417,6 +524,7 @@ def merge_request_headers(user_headers: Optional[Dict[str, str]] = None) -> Dict
 
 def build_empty_scan_result(config: Config, url: str, error: str, status: str = "error") -> dict:
     scanned_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    hardcoded_summary_fields = build_hardcoded_summary_fields([])
     return {
         "input_url": url,
         "scanned_at": scanned_at,
@@ -428,6 +536,7 @@ def build_empty_scan_result(config: Config, url: str, error: str, status: str = 
         "max_depth": config.max_depth,
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
+        "proxy_url": config.proxy_url,
         "status": status,
         "error": error,
         "recursive_enabled": config.recursive_scan,
@@ -442,11 +551,16 @@ def build_empty_scan_result(config: Config, url: str, error: str, status: str = 
         "accessible_apis": [],
         "all_pages": [],
         "all_apis": [],
+        "hardcoded_findings": [],
+        "hardcoded_summary": summarize_hardcoded_findings([]),
+        "sensitive_findings": [],
+        "sensitive_summary": summarize_hardcoded_findings([]),
         "summary": {
             "js_discovered": 0,
             "js_fetched": 0,
             "page_count": 0,
             "api_count": 0,
+            **hardcoded_summary_fields,
         },
     }
 
@@ -467,6 +581,14 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
         "js_fetched": 0,
         "page_count": 0,
         "api_count": 0,
+        "hardcoded_total": 0,
+        "hardcoded_high_or_above": 0,
+        "hardcoded_pii_count": 0,
+        "hardcoded_secret_count": 0,
+        "sensitive_total": 0,
+        "sensitive_high_or_above": 0,
+        "sensitive_pii_count": 0,
+        "sensitive_secret_count": 0,
     }
     for record in records:
         summary = record.get("summary") or {}
@@ -474,6 +596,14 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
         totals["js_fetched"] += int(summary.get("js_fetched", 0) or 0)
         totals["page_count"] += int(summary.get("page_count", 0) or 0)
         totals["api_count"] += int(summary.get("api_count", 0) or 0)
+        totals["hardcoded_total"] += summary_count(summary, "hardcoded_total", "sensitive_total")
+        totals["hardcoded_high_or_above"] += summary_count(summary, "hardcoded_high_or_above", "sensitive_high_or_above")
+        totals["hardcoded_pii_count"] += summary_count(summary, "hardcoded_pii_count", "sensitive_pii_count")
+        totals["hardcoded_secret_count"] += summary_count(summary, "hardcoded_secret_count", "sensitive_secret_count")
+        totals["sensitive_total"] += summary_count(summary, "sensitive_total", "hardcoded_total")
+        totals["sensitive_high_or_above"] += summary_count(summary, "sensitive_high_or_above", "hardcoded_high_or_above")
+        totals["sensitive_pii_count"] += summary_count(summary, "sensitive_pii_count", "hardcoded_pii_count")
+        totals["sensitive_secret_count"] += summary_count(summary, "sensitive_secret_count", "hardcoded_secret_count")
 
     recursive_total_scans = 0
     recursive_discovered_target_count = 0
@@ -501,6 +631,7 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
         "max_depth": config.max_depth,
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
+        "proxy_url": config.proxy_url,
         "result_count": len(records),
         "success_count": success_count,
         "failed_count": failed_count,
@@ -663,6 +794,7 @@ def fetch_text(
     headers: Optional[Dict[str, str]] = None,
     execution: Optional[ExecutionContext] = None,
     verify_ssl: bool = True,
+    proxy_url: str = "",
 ) -> FetchResult:
     ensure_not_cancelled(execution)
     try:
@@ -679,12 +811,21 @@ def fetch_text(
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
+    proxy = str(proxy_url or "").strip()
 
     try:
         if execution is not None:
             execution.request_throttle.wait_for_turn(cancel_event=execution.cancel_event)
             ensure_not_cancelled(execution)
-        with urlopen(request, timeout=timeout, context=ssl_context) as response:
+        if proxy:
+            proxy_handlers = [ProxyHandler({"http": proxy, "https": proxy})]
+            if ssl_context is not None:
+                proxy_handlers.append(HTTPSHandler(context=ssl_context))
+            opener = build_opener(*proxy_handlers)
+            request_context = opener.open(request, timeout=timeout)
+        else:
+            request_context = urlopen(request, timeout=timeout, context=ssl_context)
+        with request_context as response:
             text = read_response_text(response)
             return FetchResult(
                 url=url,
@@ -830,6 +971,462 @@ def extract_additional_js_urls(script_text: str, source_url: str, scope: UrlScop
     return discovered
 
 
+def _normalize_hardcoded_field_name(field_name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(field_name or "").strip().lower())
+
+
+def _line_column_from_offset(text: str, index: int) -> Tuple[int, int]:
+    safe_index = max(0, min(index, len(text)))
+    line = text.count("\n", 0, safe_index) + 1
+    last_line_break = text.rfind("\n", 0, safe_index)
+    if last_line_break < 0:
+        column = safe_index + 1
+    else:
+        column = safe_index - last_line_break
+    return line, column
+
+
+def _extract_context_snippet(text: str, start: int, end: int, radius: int = HARD_CODED_LINE_CONTEXT_RADIUS) -> str:
+    left = max(0, start - radius)
+    right = min(len(text), end + radius)
+    return text[left:right].replace("\n", " ").replace("\r", " ").strip()
+
+
+def _looks_like_dynamic_reference(value: str) -> bool:
+    lowered = str(value or "").strip().lower()
+    if not lowered:
+        return False
+    return lowered.startswith("$") or any(marker in lowered for marker in HARD_CODED_DYNAMIC_VALUE_MARKERS)
+
+
+def _normalize_hardcoded_value(category: str, value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if category == "email":
+        return raw.lower()
+    if category == "phone":
+        return re.sub(r"\D", "", raw)
+    if category in {"person_name", "account_id", "user_id"}:
+        return re.sub(r"\s+", " ", raw).strip().lower()
+    return raw.strip()
+
+
+def _mask_hardcoded_value(category: str, value: str) -> str:
+    raw = str(value or "")
+    if not raw:
+        return ""
+    if category == "email" and "@" in raw:
+        local, domain = raw.split("@", 1)
+        if len(local) <= 1:
+            return f"* @{domain}".replace(" ", "")
+        return f"{local[:1]}***@{domain}"
+    if category == "phone":
+        digits = re.sub(r"\D", "", raw)
+        if len(digits) <= 7:
+            return "*" * len(digits)
+        return f"{digits[:3]}-****-{digits[-4:]}"
+    if category == "person_name":
+        compact = re.sub(r"\s+", " ", raw).strip()
+        if len(compact) <= 1:
+            return "*"
+        if len(compact) == 2:
+            return f"{compact[0]}*"
+        return f"{compact[0]}***{compact[-1]}"
+    if len(raw) <= 4:
+        return "*" * len(raw)
+    return f"{raw[:2]}***{raw[-2:]}"
+
+
+def _is_placeholder_hardcoded_value(category: str, value: str, normalized_value: str) -> bool:
+    lowered = str(value or "").strip().lower()
+    normalized = str(normalized_value or "").strip().lower()
+    if lowered in HARD_CODED_PLACEHOLDER_VALUES or normalized in HARD_CODED_PLACEHOLDER_VALUES:
+        return True
+    if category == "email" and "@" in lowered:
+        domain = lowered.split("@", 1)[1]
+        if domain in HARD_CODED_EMAIL_PLACEHOLDER_DOMAINS:
+            return True
+    if category == "phone":
+        digits = re.sub(r"\D", "", lowered)
+        if not digits:
+            return True
+        if digits in {"0" * len(digits), "1" * len(digits)}:
+            return True
+    if "dummy" in lowered or "sample" in lowered or "fixture" in lowered or "mock" in lowered:
+        return True
+    return False
+
+
+def _is_valid_phone_candidate(value: str) -> bool:
+    return _is_valid_phone_candidate_with_context(value, field_name="", context="")
+
+
+def _has_phone_context(field_name: str, context: str) -> bool:
+    normalized_field = _normalize_hardcoded_field_name(field_name)
+    if normalized_field in HARD_CODED_PHONE_KEYS:
+        return True
+    context_lower = str(context or "").lower()
+    return any(hint in context_lower for hint in HARD_CODED_PHONE_CONTEXT_HINTS)
+
+
+def _is_valid_phone_candidate_with_context(value: str, field_name: str, context: str) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) < 8 or len(digits) > 15:
+        return False
+    if re.fullmatch(r"(19|20)\d{6}", digits):
+        return False
+    raw_lower = raw.lower()
+    if raw_lower.startswith(("+", "00")) and not _has_phone_context(field_name, context):
+        return False
+    return True
+
+
+def _is_probable_person_name(value: str) -> bool:
+    raw = re.sub(r"\s+", " ", str(value or "").strip())
+    if not raw:
+        return False
+    lowered = raw.lower()
+    if lowered in {"admin", "root", "test", "guest", "user"}:
+        return False
+    if re.fullmatch(r"[가-힣]{2,5}", raw):
+        return True
+    tokens = [token for token in raw.split(" ") if token]
+    if len(tokens) < 2:
+        return False
+    return all(bool(re.fullmatch(r"[A-Za-z][A-Za-z.'\-]{0,20}", token)) for token in tokens)
+
+
+def _categorize_hardcoded_field(field_name: str, value: str) -> Optional[str]:
+    normalized_key = _normalize_hardcoded_field_name(field_name)
+    stripped_value = str(value or "").strip()
+    if normalized_key in HARD_CODED_NAME_KEYS:
+        return "person_name" if _is_probable_person_name(stripped_value) else None
+    if normalized_key in HARD_CODED_EMAIL_KEYS:
+        return "email" if HARD_CODED_EMAIL_RE.fullmatch(stripped_value) else None
+    if normalized_key in HARD_CODED_PHONE_KEYS:
+        return "phone" if _is_valid_phone_candidate_with_context(stripped_value, field_name=field_name, context=field_name) else None
+    if normalized_key in HARD_CODED_ACCOUNT_ID_KEYS:
+        return "account_id"
+    if normalized_key in HARD_CODED_USER_ID_KEYS:
+        return "user_id"
+    if normalized_key in HARD_CODED_CREDENTIAL_KEYS:
+        return "credential"
+    if normalized_key in HARD_CODED_TOKEN_KEYS:
+        return "token"
+    return None
+
+
+def _score_hardcoded_finding(
+    category: str,
+    field_name: str,
+    context: str,
+    source_type: str,
+    is_placeholder: bool,
+) -> float:
+    base_confidence = {
+        "email": 0.74,
+        "phone": 0.72,
+        "person_name": 0.65,
+        "account_id": 0.73,
+        "user_id": 0.75,
+        "credential": 0.90,
+        "token": 0.92,
+    }.get(category, 0.60)
+    if field_name:
+        base_confidence += 0.10
+
+    context_lower = context.lower()
+    if any(keyword in context_lower for keyword in ("login", "admin", "account", "auth", "password", "token")):
+        base_confidence += 0.08
+    if source_type == "js":
+        base_confidence += 0.05
+    if is_placeholder:
+        base_confidence -= 0.35
+    return max(0.05, min(0.99, round(base_confidence, 3)))
+
+
+def _severity_for_hardcoded_finding(category: str, confidence: float) -> str:
+    if category in HARD_CODED_SECRET_CATEGORIES and confidence >= 0.80:
+        return "critical"
+    if confidence >= 0.85:
+        return "high"
+    if confidence >= 0.65:
+        return "medium"
+    return "low"
+
+
+def _append_hardcoded_finding(
+    findings: List[dict],
+    dedupe_keys: Set[Tuple[str, str, str, str, int, int]],
+    *,
+    category: str,
+    field_name: str,
+    value: str,
+    source_type: str,
+    source_url: str,
+    source_label: str,
+    line: int,
+    column: int,
+    context: str,
+    matched_by: str,
+) -> None:
+    normalized_value = _normalize_hardcoded_value(category, value)
+    if not normalized_value:
+        return
+    dedupe_key = (
+        category,
+        normalized_value,
+        source_type,
+        source_label,
+        int(line or 0),
+        int(column or 0),
+    )
+    if dedupe_key in dedupe_keys:
+        return
+
+    is_placeholder = _is_placeholder_hardcoded_value(category, value, normalized_value)
+    confidence = _score_hardcoded_finding(
+        category=category,
+        field_name=field_name,
+        context=context,
+        source_type=source_type,
+        is_placeholder=is_placeholder,
+    )
+    severity = _severity_for_hardcoded_finding(category, confidence)
+    findings.append(
+        {
+            "category": category,
+            "field_name": field_name,
+            "value": value,
+            "masked_value": _mask_hardcoded_value(category, value),
+            "normalized_value": normalized_value,
+            "source_type": source_type,
+            "source_url": source_url,
+            "source_label": source_label,
+            "line": int(line or 0),
+            "column": int(column or 0),
+            "context": context,
+            "confidence": confidence,
+            "severity": severity,
+            "matched_by": matched_by,
+        }
+    )
+    dedupe_keys.add(dedupe_key)
+
+
+def collect_hardcoded_findings(
+    text: str,
+    source_url: str,
+    source_label: str,
+    source_type: str,
+    findings: List[dict],
+    dedupe_keys: Set[Tuple[str, str, str, str, int, int]],
+) -> None:
+    if not text:
+        return
+
+    for match in HARD_CODED_KEY_VALUE_RE.finditer(text):
+        field_name = (match.group("key") or "").strip()
+        value = (match.group("value") or "").strip()
+        if not field_name or not value:
+            continue
+        if _looks_like_dynamic_reference(value):
+            continue
+
+        category = _categorize_hardcoded_field(field_name, value)
+        if category is None:
+            continue
+        start = match.start("value")
+        end = match.end("value")
+        context = _extract_context_snippet(text, start, end)
+        if category == "email" and not HARD_CODED_EMAIL_RE.fullmatch(value):
+            continue
+        if category == "phone" and not _is_valid_phone_candidate_with_context(value, field_name=field_name, context=context):
+            continue
+        if category == "person_name" and not _is_probable_person_name(value):
+            continue
+
+        line, column = _line_column_from_offset(text, start)
+        _append_hardcoded_finding(
+            findings=findings,
+            dedupe_keys=dedupe_keys,
+            category=category,
+            field_name=field_name,
+            value=value,
+            source_type=source_type,
+            source_url=source_url,
+            source_label=source_label,
+            line=line,
+            column=column,
+            context=context,
+            matched_by="key_context.literal",
+        )
+
+    for match in HARD_CODED_EMAIL_RE.finditer(text):
+        value = (match.group("value") or "").strip()
+        if not value:
+            continue
+        start = match.start("value")
+        end = match.end("value")
+        context = _extract_context_snippet(text, start, end)
+        if "://" in context and ":" in context.split("@", 1)[0]:
+            continue
+        line, column = _line_column_from_offset(text, start)
+        _append_hardcoded_finding(
+            findings=findings,
+            dedupe_keys=dedupe_keys,
+            category="email",
+            field_name="",
+            value=value,
+            source_type=source_type,
+            source_url=source_url,
+            source_label=source_label,
+            line=line,
+            column=column,
+            context=context,
+            matched_by="regex.email",
+        )
+
+    for match in HARD_CODED_PHONE_RE.finditer(text):
+        value = (match.group("value") or "").strip()
+        if not value:
+            continue
+        start = match.start("value")
+        end = match.end("value")
+        context = _extract_context_snippet(text, start, end)
+        if _looks_like_dynamic_reference(value) or not _is_valid_phone_candidate_with_context(value, field_name="", context=context):
+            continue
+        line, column = _line_column_from_offset(text, start)
+        _append_hardcoded_finding(
+            findings=findings,
+            dedupe_keys=dedupe_keys,
+            category="phone",
+            field_name="",
+            value=value,
+            source_type=source_type,
+            source_url=source_url,
+            source_label=source_label,
+            line=line,
+            column=column,
+            context=context,
+            matched_by="regex.phone",
+        )
+
+
+def dedupe_hardcoded_findings(rows: List[dict]) -> Tuple[List[dict], int]:
+    deduped: List[dict] = []
+    dedupe_keys: Set[Tuple[str, str, str, str, int, int]] = set()
+    skipped = 0
+    for item in rows:
+        category = str(item.get("category", "") or "")
+        normalized = str(item.get("normalized_value", "") or "")
+        source_type = str(item.get("source_type", "") or "")
+        source_label = str(item.get("source_label", "") or "")
+        line = int(item.get("line", 0) or 0)
+        column = int(item.get("column", 0) or 0)
+        key = (category, normalized, source_type, source_label, line, column)
+        if not category or not normalized:
+            continue
+        if key in dedupe_keys:
+            skipped += 1
+            continue
+        dedupe_keys.add(key)
+        deduped.append(dict(item))
+    deduped.sort(
+        key=lambda finding: (
+            HARD_CODED_SEVERITY_LEVELS.index(str(finding.get("severity", "low")) if str(finding.get("severity", "low")) in HARD_CODED_SEVERITY_LEVELS else "low"),
+            -float(finding.get("confidence", 0.0) or 0.0),
+            str(finding.get("category", "")),
+            str(finding.get("source_url", "")),
+            int(finding.get("line", 0) or 0),
+        )
+    )
+    return deduped, skipped
+
+
+def summarize_hardcoded_findings(findings: List[dict]) -> dict:
+    by_category = {category: 0 for category in HARD_CODED_ALL_CATEGORIES}
+    by_severity = {severity: 0 for severity in HARD_CODED_SEVERITY_LEVELS}
+    for item in findings:
+        category = str(item.get("category", "") or "")
+        severity = str(item.get("severity", "") or "").lower()
+        if category in by_category:
+            by_category[category] += 1
+        if severity in by_severity:
+            by_severity[severity] += 1
+    return {
+        "total": len(findings),
+        "by_category": by_category,
+        "by_severity": by_severity,
+    }
+
+
+def build_hardcoded_summary_fields(findings: List[dict]) -> Dict[str, int]:
+    high_or_above = 0
+    pii_count = 0
+    secret_count = 0
+    for item in findings:
+        category = str(item.get("category", "") or "")
+        severity = str(item.get("severity", "") or "").lower()
+        if severity in {"critical", "high"}:
+            high_or_above += 1
+        if category in HARD_CODED_PII_CATEGORIES:
+            pii_count += 1
+        if category in HARD_CODED_SECRET_CATEGORIES:
+            secret_count += 1
+    return {
+        "hardcoded_total": len(findings),
+        "hardcoded_high_or_above": high_or_above,
+        "hardcoded_pii_count": pii_count,
+        "hardcoded_secret_count": secret_count,
+        "sensitive_total": len(findings),
+        "sensitive_high_or_above": high_or_above,
+        "sensitive_pii_count": pii_count,
+        "sensitive_secret_count": secret_count,
+    }
+
+
+def resolve_sensitive_findings(result: dict) -> List[dict]:
+    hardcoded_raw = result.get("hardcoded_findings")
+    sensitive_raw = result.get("sensitive_findings")
+    hardcoded = [item for item in hardcoded_raw if isinstance(item, dict)] if isinstance(hardcoded_raw, list) else []
+    sensitive = [item for item in sensitive_raw if isinstance(item, dict)] if isinstance(sensitive_raw, list) else []
+    if not hardcoded and not sensitive:
+        return []
+    if hardcoded and not sensitive:
+        return hardcoded
+    if sensitive and not hardcoded:
+        return sensitive
+
+    merged: List[dict] = []
+    seen: Set[Tuple[str, str, str, str, int, int]] = set()
+    for item in hardcoded + sensitive:
+        category = str(item.get("category", item.get("type", "")) or "")
+        normalized_value = str(item.get("normalized_value", item.get("value", "")) or "")
+        source_type = str(item.get("source_type", item.get("source_kind", "")) or "")
+        source_label = str(item.get("source_label", item.get("source_url", "")) or "")
+        line = int(item.get("line", 0) or 0)
+        column = int(item.get("column", 0) or 0)
+        key = (category, normalized_value, source_type, source_label, line, column)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged
+
+
+def summary_count(summary: dict, hardcoded_key: str, sensitive_key: str, default: int = 0) -> int:
+    if hardcoded_key in summary:
+        return int(summary.get(hardcoded_key, default) or 0)
+    if sensitive_key in summary:
+        return int(summary.get(sensitive_key, default) or 0)
+    return int(default or 0)
+
+
 def probe_candidate(
     url: str,
     kind: str,
@@ -837,10 +1434,20 @@ def probe_candidate(
     headers: Optional[Dict[str, str]] = None,
     execution: Optional[ExecutionContext] = None,
     verify_ssl: bool = True,
+    proxy_url: str = "",
 ) -> ProbeResult:
     methods: Iterable[str] = ("HEAD", "OPTIONS", "GET") if kind == "api" else ("HEAD", "GET")
     for method in methods:
-        result = fetch_text(url, timeout=timeout, method=method, headers=headers, execution=execution, verify_ssl=verify_ssl)
+        fetch_kwargs = {
+            "timeout": timeout,
+            "method": method,
+            "headers": headers,
+            "execution": execution,
+            "verify_ssl": verify_ssl,
+        }
+        if proxy_url:
+            fetch_kwargs["proxy_url"] = proxy_url
+        result = fetch_text(url, **fetch_kwargs)
         if result.success:
             return ProbeResult(accessible=True, status_code=result.status_code, method=method, error=None)
         if result.status_code in {401, 403}:
@@ -863,11 +1470,20 @@ def build_result_row(
     headers: Optional[Dict[str, str]] = None,
     execution: Optional[ExecutionContext] = None,
     verify_ssl: bool = True,
+    proxy_url: str = "",
 ) -> dict:
     if skip_probe:
         probe = ProbeResult(accessible=None, status_code=None, method=None, error="프로브가 생략되었습니다.")
     else:
-        probe = probe_candidate(candidate.url, kind=kind, timeout=timeout, headers=headers, execution=execution, verify_ssl=verify_ssl)
+        probe = probe_candidate(
+            candidate.url,
+            kind=kind,
+            timeout=timeout,
+            headers=headers,
+            execution=execution,
+            verify_ssl=verify_ssl,
+            proxy_url=proxy_url,
+        )
     return {
         "path": candidate.path,
         "url": candidate.url,
@@ -888,6 +1504,7 @@ def build_result_rows(
     execution: Optional[ExecutionContext] = None,
     progress: ProgressCallback = None,
     verify_ssl: bool = True,
+    proxy_url: str = "",
 ) -> List[dict]:
     ordered_candidates = sorted(bucket.values(), key=lambda item: (item.path, item.url))
     total = len(ordered_candidates)
@@ -908,6 +1525,7 @@ def build_result_rows(
                     headers=headers,
                     execution=execution,
                     verify_ssl=verify_ssl,
+                    proxy_url=proxy_url,
                 )
             )
         return rows
@@ -933,6 +1551,7 @@ def build_result_rows(
             headers,
             execution,
             verify_ssl,
+            proxy_url,
         )
         pending_futures[future] = (index, candidate.path)
         return True
@@ -1073,6 +1692,7 @@ def apply_recursive_metadata(
     enriched = dict(result)
     enriched["include_subdomains"] = config.include_subdomains
     enriched["excluded_subdomains"] = list(config.excluded_subdomains)
+    enriched["proxy_url"] = config.proxy_url
     enriched["recursive_enabled"] = config.recursive_scan
     enriched["recursive_depth"] = config.recursive_depth if config.recursive_scan else 0
     enriched["recursive_scanned_targets"] = list(state.scanned_target_urls)
@@ -1100,6 +1720,7 @@ def combine_recursive_scan_results(
     combined_discovered_js_urls: Set[str] = set()
     combined_pages_raw: List[dict] = []
     combined_apis_raw: List[dict] = []
+    combined_hardcoded_raw: List[dict] = []
     scan_records: List[dict] = []
 
     for target_url, depth, result in successful_results:
@@ -1107,6 +1728,7 @@ def combine_recursive_scan_results(
         combined_discovered_js_urls.update(result.get("js_discovered_urls", []))
         combined_pages_raw.extend(result.get("all_pages", []))
         combined_apis_raw.extend(result.get("all_apis", []))
+        combined_hardcoded_raw.extend(result.get("hardcoded_findings", []) or [])
         scan_records.append(
             {
                 "target_url": target_url,
@@ -1129,6 +1751,9 @@ def combine_recursive_scan_results(
     combined_js, skipped_combined_js = dedupe_js_rows_by_url(combined_js_raw)
     combined_pages, skipped_combined_pages = dedupe_result_rows_by_path(combined_pages_raw)
     combined_apis, skipped_combined_apis = dedupe_result_rows_by_path(combined_apis_raw)
+    combined_hardcoded_findings, _ = dedupe_hardcoded_findings(combined_hardcoded_raw)
+    combined_hardcoded_summary = summarize_hardcoded_findings(combined_hardcoded_findings)
+    combined_hardcoded_summary_fields = build_hardcoded_summary_fields(combined_hardcoded_findings)
     state.skipped_js_duplicates += skipped_combined_js
     state.skipped_page_duplicates += skipped_combined_pages
     state.skipped_api_duplicates += skipped_combined_apis
@@ -1144,17 +1769,23 @@ def combine_recursive_scan_results(
         "max_depth": config.max_depth,
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
+        "proxy_url": config.proxy_url,
         "js_files": combined_js,
         "accessible_pages": [item for item in combined_pages if item.get("accessible") is True],
         "accessible_apis": [item for item in combined_apis if item.get("accessible") is True],
         "all_pages": combined_pages,
         "all_apis": combined_apis,
+        "hardcoded_findings": combined_hardcoded_findings,
+        "hardcoded_summary": combined_hardcoded_summary,
+        "sensitive_findings": combined_hardcoded_findings,
+        "sensitive_summary": combined_hardcoded_summary,
         "js_discovered_urls": sorted(combined_discovered_js_urls),
         "summary": {
             "js_discovered": len(combined_discovered_js_urls),
             "js_fetched": len(combined_js),
             "page_count": len(combined_pages),
             "api_count": len(combined_apis),
+            **combined_hardcoded_summary_fields,
         },
     }
     return apply_recursive_metadata(merged, config, state, failed_targets, scan_records)
@@ -1180,7 +1811,16 @@ def _discover_once(
     )
 
     emit_progress(progress, f"시작 문서를 가져오는 중: {root_url}")
-    html_result = fetch_text(root_url, timeout=config.timeout, method="GET", headers=config.headers, execution=execution, verify_ssl=config.verify_ssl)
+    html_fetch_kwargs = {
+        "timeout": config.timeout,
+        "method": "GET",
+        "headers": config.headers,
+        "execution": execution,
+        "verify_ssl": config.verify_ssl,
+    }
+    if config.proxy_url:
+        html_fetch_kwargs["proxy_url"] = config.proxy_url
+    html_result = fetch_text(root_url, **html_fetch_kwargs)
     if not html_result.success:
         raise RuntimeError(f"시작 페이지를 가져오지 못했습니다: {html_result.url} / {html_result.error or html_result.status_code}")
 
@@ -1189,6 +1829,8 @@ def _discover_once(
     discovered_js_urls: Set[str] = set()
     visited_scripts: Set[str] = set()
     fetched_scripts: List[dict] = []
+    hardcoded_findings: List[dict] = []
+    hardcoded_dedupe_keys: Set[Tuple[str, str, str, str, int, int]] = set()
     successful_js_fetches = 0
     queue: Deque[Tuple[str, int]] = deque()
 
@@ -1209,15 +1851,32 @@ def _discover_once(
         page_bucket=page_bucket,
         api_bucket=api_bucket,
     )
+    collect_hardcoded_findings(
+        text=html_result.text,
+        source_url=root_url,
+        source_label=f"html:{root_url}",
+        source_type="html",
+        findings=hardcoded_findings,
+        dedupe_keys=hardcoded_dedupe_keys,
+    )
 
-    for inline_script in inline_scripts:
+    for inline_index, inline_script in enumerate(inline_scripts, start=1):
+        inline_source_label = f"inline-script:{root_url}#{inline_index}"
         collect_path_candidates(
             text=inline_script,
             base_url=root_url,
-            source_label=f"inline-script:{root_url}",
+            source_label=inline_source_label,
             scope=scope,
             page_bucket=page_bucket,
             api_bucket=api_bucket,
+        )
+        collect_hardcoded_findings(
+            text=inline_script,
+            source_url=root_url,
+            source_label=inline_source_label,
+            source_type="inline_script",
+            findings=hardcoded_findings,
+            dedupe_keys=hardcoded_dedupe_keys,
         )
 
     while queue and successful_js_fetches < config.max_js_files:
@@ -1231,7 +1890,16 @@ def _discover_once(
 
         visited_scripts.add(script_url)
         emit_progress(progress, f"JS 가져오는 중 {successful_js_fetches + 1}/{config.max_js_files}: {script_url}")
-        js_result = fetch_text(script_url, timeout=config.timeout, method="GET", headers=config.headers, execution=execution, verify_ssl=config.verify_ssl)
+        js_fetch_kwargs = {
+            "timeout": config.timeout,
+            "method": "GET",
+            "headers": config.headers,
+            "execution": execution,
+            "verify_ssl": config.verify_ssl,
+        }
+        if config.proxy_url:
+            js_fetch_kwargs["proxy_url"] = config.proxy_url
+        js_result = fetch_text(script_url, **js_fetch_kwargs)
         fetched_scripts.append(
             {
                 "url": script_url,
@@ -1260,6 +1928,14 @@ def _discover_once(
             page_bucket=page_bucket,
             api_bucket=api_bucket,
         )
+        collect_hardcoded_findings(
+            text=js_result.text,
+            source_url=script_url,
+            source_label=f"js:{script_url}",
+            source_type="js",
+            findings=hardcoded_findings,
+            dedupe_keys=hardcoded_dedupe_keys,
+        )
 
         for child_url in extract_additional_js_urls(js_result.text, script_url, scope):
             discovered_js_urls.add(child_url)
@@ -1285,6 +1961,7 @@ def _discover_once(
         execution=execution,
         progress=progress,
         verify_ssl=config.verify_ssl,
+        proxy_url=config.proxy_url,
     )
 
     ensure_not_cancelled(execution)
@@ -1298,6 +1975,7 @@ def _discover_once(
         execution=execution,
         progress=progress,
         verify_ssl=config.verify_ssl,
+        proxy_url=config.proxy_url,
     )
 
     all_pages, skipped_row_pages = dedupe_result_rows_by_path(all_pages)
@@ -1310,6 +1988,10 @@ def _discover_once(
     for item in all_apis:
         state.known_api_paths.add(item["path"])
 
+    hardcoded_findings, _ = dedupe_hardcoded_findings(hardcoded_findings)
+    hardcoded_summary = summarize_hardcoded_findings(hardcoded_findings)
+    hardcoded_summary_fields = build_hardcoded_summary_fields(hardcoded_findings)
+
     return {
         "input_url": root_url,
         "scanned_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
@@ -1319,17 +2001,23 @@ def _discover_once(
         "max_depth": config.max_depth,
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
+        "proxy_url": config.proxy_url,
         "js_files": sorted(fetched_scripts, key=lambda item: (item["depth"], item["url"])),
         "js_discovered_urls": sorted(discovered_js_urls),
         "accessible_pages": [item for item in all_pages if item["accessible"] is True],
         "accessible_apis": [item for item in all_apis if item["accessible"] is True],
         "all_pages": all_pages,
         "all_apis": all_apis,
+        "hardcoded_findings": hardcoded_findings,
+        "hardcoded_summary": hardcoded_summary,
+        "sensitive_findings": hardcoded_findings,
+        "sensitive_summary": hardcoded_summary,
         "summary": {
             "js_discovered": len(discovered_js_urls),
             "js_fetched": len(fetched_scripts),
             "page_count": len(all_pages),
             "api_count": len(all_apis),
+            **hardcoded_summary_fields,
         },
     }
 
@@ -1436,6 +2124,7 @@ def discover_many(config: Config, urls: List[str], progress: ProgressCallback = 
             request_delay=config.request_delay,
             headers=dict(config.headers),
             verify_ssl=config.verify_ssl,
+            proxy_url=config.proxy_url,
         )
         try:
             result = discover(
@@ -1488,11 +2177,13 @@ def build_workbook_sheets(data: dict, output_path: Path) -> List[SheetSpec]:
 
 
 def build_single_workbook_sheets(result: dict, output_path: Path) -> List[SheetSpec]:
+    findings = resolve_sensitive_findings(result)
     return [
         SheetSpec("요약", [[line] for line in build_summary_lines(result, output_path)]),
         SheetSpec("JS 파일", build_js_sheet_rows(result.get("js_files", []))),
         SheetSpec("페이지", build_result_sheet_rows(result.get("all_pages", []))),
         SheetSpec("API", build_result_sheet_rows(result.get("all_apis", []))),
+        SheetSpec("민감정보", build_hardcoded_sheet_rows(findings)),
     ]
 
 
@@ -1524,6 +2215,10 @@ def build_batch_summary_lines(batch_result: dict, output_path: Path) -> List[str
     summary = batch_result["summary"]
     dedupe = summary.get("recursive_dedupe") or {}
     excluded_subdomains = ", ".join(batch_result.get("excluded_subdomains", []) or []) or "-"
+    hardcoded_total = summary_count(summary, "hardcoded_total", "sensitive_total")
+    hardcoded_high_or_above = summary_count(summary, "hardcoded_high_or_above", "sensitive_high_or_above")
+    hardcoded_pii_count = summary_count(summary, "hardcoded_pii_count", "sensitive_pii_count")
+    hardcoded_secret_count = summary_count(summary, "hardcoded_secret_count", "sensitive_secret_count")
     lines = [
         "=== 배치 요약 ===",
         f"입력 URL 개수: {summary['input_url_count']}",
@@ -1533,8 +2228,13 @@ def build_batch_summary_lines(batch_result: dict, output_path: Path) -> List[str
         f"JS 파일 합계: {summary['js_fetched']}",
         f"페이지 후보 합계: {summary['page_count']}",
         f"API 후보 합계: {summary['api_count']}",
+        f"민감정보 탐지 합계: {hardcoded_total}",
+        f"고위험 이상(High+) 합계: {hardcoded_high_or_above}",
+        f"개인정보(PII) 합계: {hardcoded_pii_count}",
+        f"비밀정보(Secret) 합계: {hardcoded_secret_count}",
         f"동시 요청 수: {int(batch_result.get('max_workers', 1) or 1)}",
         f"요청 딜레이(초): {float(batch_result.get('request_delay', 0.0) or 0.0):g}",
+        f"프록시: {batch_result.get('proxy_url') or '-'}",
         f"서브도메인 포함: {'사용' if batch_result.get('include_subdomains', True) else '미사용'}",
         f"제외 서브도메인: {excluded_subdomains}",
         f"재귀 탐색: {'사용' if batch_result.get('recursive_enabled') else '미사용'}",
@@ -1585,6 +2285,7 @@ def build_record_sheet_base_name(record: dict, index: int, total: int) -> str:
 
 
 def build_record_detail_sheet_rows(record: dict, output_path: Path) -> List[List[object]]:
+    findings = resolve_sensitive_findings(record)
     rows: List[List[object]] = [[line] for line in build_summary_lines(record, output_path)]
     rows.extend([[]])
     rows.append(["=== JS 파일 ==="])
@@ -1595,6 +2296,9 @@ def build_record_detail_sheet_rows(record: dict, output_path: Path) -> List[List
     rows.extend([[]])
     rows.append(["=== API ==="])
     rows.extend(build_result_sheet_rows(record.get("all_apis", [])))
+    rows.extend([[]])
+    rows.append(["=== 민감정보 ==="])
+    rows.extend(build_hardcoded_sheet_rows(findings))
     return rows
 
 
@@ -1615,6 +2319,9 @@ def build_record_group_sheet_rows(records: List[dict], output_path: Path, start_
         rows.append([])
         rows.append(["=== API ==="])
         rows.extend(build_result_sheet_rows(record.get("all_apis", [])))
+        rows.append([])
+        rows.append(["=== 민감정보 ==="])
+        rows.extend(build_hardcoded_sheet_rows(resolve_sensitive_findings(record)))
     return rows
 
 
@@ -1645,6 +2352,43 @@ def build_result_sheet_rows(rows_data: List[dict]) -> List[List[object]]:
                 item.get("path", "") or "",
                 ", ".join(item.get("sources", [])),
                 item.get("url", ""),
+            ]
+        )
+    return rows
+
+
+def build_hardcoded_sheet_rows(rows_data: List[dict]) -> List[List[object]]:
+    rows: List[List[object]] = [
+        [
+            "심각도",
+            "신뢰도",
+            "범주",
+            "필드",
+            "마스킹 값",
+            "원본 유형",
+            "라인",
+            "열",
+            "출처",
+            "URL",
+            "탐지 방식",
+            "컨텍스트",
+        ]
+    ]
+    for item in rows_data:
+        rows.append(
+            [
+                item.get("severity", ""),
+                item.get("confidence", ""),
+                item.get("category", ""),
+                item.get("field_name", ""),
+                item.get("masked_value", ""),
+                item.get("source_type", ""),
+                item.get("line", ""),
+                item.get("column", ""),
+                item.get("source_label", ""),
+                item.get("source_url", ""),
+                item.get("matched_by", ""),
+                item.get("context", ""),
             ]
         )
     return rows
@@ -1881,6 +2625,11 @@ def filter_table_rows(
 def build_summary_lines(result: dict, output_path: Path, language: str = "ko") -> List[str]:
     language = _normalize_language(language)
     summary = result["summary"]
+    findings = resolve_sensitive_findings(result)
+    hardcoded_total = summary_count(summary, "hardcoded_total", "sensitive_total", default=len(findings))
+    hardcoded_high_or_above = summary_count(summary, "hardcoded_high_or_above", "sensitive_high_or_above")
+    hardcoded_pii_count = summary_count(summary, "hardcoded_pii_count", "sensitive_pii_count")
+    hardcoded_secret_count = summary_count(summary, "hardcoded_secret_count", "sensitive_secret_count")
     excluded_subdomains = ", ".join(result.get("excluded_subdomains", []) or []) or "-"
     lines = [
         _localized_text(language, "=== 요약 ===", "=== Summary ==="),
@@ -1899,8 +2648,13 @@ def build_summary_lines(result: dict, output_path: Path, language: str = "ko") -
             f"{_localized_text(language, '가져온 JS 파일 수', 'Fetched JS files')}: {summary['js_fetched']}",
             f"{_localized_text(language, '페이지 후보 수', 'Page candidates')}: {summary['page_count']}",
             f"{_localized_text(language, 'API 후보 수', 'API candidates')}: {summary['api_count']}",
+            f"{_localized_text(language, '민감정보 탐지 수', 'Hardcoded findings')}: {hardcoded_total}",
+            f"{_localized_text(language, '고위험 이상(High+) 수', 'High or above findings')}: {hardcoded_high_or_above}",
+            f"{_localized_text(language, '개인정보(PII) 탐지 수', 'PII findings')}: {hardcoded_pii_count}",
+            f"{_localized_text(language, '비밀정보(Secret) 탐지 수', 'Secret findings')}: {hardcoded_secret_count}",
             f"{_localized_text(language, '동시 요청 수', 'Max workers')}: {int(result.get('max_workers', 1) or 1)}",
             f"{_localized_text(language, '요청 딜레이(초)', 'Request delay (sec)')}: {float(result.get('request_delay', 0.0) or 0.0):g}",
+            f"{_localized_text(language, '프록시', 'Proxy')}: {result.get('proxy_url') or '-'}",
             f"{_localized_text(language, '프로브 생략 여부', 'Probe skipped')}: {_format_yes_no_label(bool(result['probe_skipped']), language)}",
             f"{_localized_text(language, '서브도메인 포함', 'Include subdomains')}: {_format_enabled_label(bool(result.get('include_subdomains', True)), language)}",
             f"{_localized_text(language, '제외 서브도메인', 'Excluded subdomains')}: {excluded_subdomains}",

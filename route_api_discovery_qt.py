@@ -86,6 +86,8 @@ UI_TEXTS = {
         "recursive_depth": "재귀 단계",
         "max_workers": "동시 요청 수",
         "request_delay": "요청 딜레이",
+        "proxy": "프록시",
+        "proxy_placeholder": "예: http://127.0.0.1:8080",
         "language": "언어",
         "language_ko": "한국어",
         "language_en": "영어",
@@ -112,9 +114,12 @@ UI_TEXTS = {
         "metric_page": "페이지 수",
         "metric_api": "API 수",
         "metric_recursive": "재귀 스캔 대상 수",
+        "metric_sensitive_total": "민감정보 총계",
+        "metric_sensitive_high": "민감정보 high+",
         "empty_state": "아직 결과가 없습니다.\n좌측에서 대상 URL을 입력하고 실행하세요.",
         "running_state": "탐색 실행 중입니다...\n진행 로그를 확인하세요.",
         "tab_summary": "요약",
+        "tab_sensitive": "민감정보",
         "tab_js": "JS 파일",
         "tab_page": "페이지",
         "tab_api": "API",
@@ -129,11 +134,27 @@ UI_TEXTS = {
         "header_method": "방법",
         "header_path": "경로",
         "header_source": "출처",
+        "header_sensitive_type": "유형",
+        "header_masked_value": "마스킹값",
+        "header_confidence": "신뢰도",
+        "header_severity": "심각도",
+        "header_location": "위치",
         "quick_success_only": "성공만",
         "quick_accessible_only": "접근 가능만",
+        "quick_high_only": "High only",
         "status_200_only": "상태 200만",
         "filter": "필터",
+        "filter_type": "유형",
         "all": "전체",
+        "sensitive_type_all": "전체",
+        "sensitive_type_email": "email",
+        "sensitive_type_phone": "phone",
+        "sensitive_type_name": "name",
+        "sensitive_type_account": "account",
+        "sensitive_type_credential": "credential",
+        "sensitive_type_token": "token",
+        "sensitive_type_user_id": "user_id",
+        "sensitive_type_other": "other",
         "search_placeholder": "검색어 입력",
         "reset": "초기화",
         "count_label": "표시 {visible} / 전체 {total}",
@@ -197,6 +218,8 @@ UI_TEXTS = {
         "recursive_depth": "Recursive depth",
         "max_workers": "Concurrent requests",
         "request_delay": "Request delay",
+        "proxy": "Proxy",
+        "proxy_placeholder": "Example: http://127.0.0.1:8080",
         "language": "Language",
         "language_ko": "Korean",
         "language_en": "English",
@@ -223,9 +246,12 @@ UI_TEXTS = {
         "metric_page": "Pages",
         "metric_api": "APIs",
         "metric_recursive": "Recursive targets",
+        "metric_sensitive_total": "Sensitive total",
+        "metric_sensitive_high": "Sensitive high+",
         "empty_state": "No results yet.\nEnter a target URL on the left and run the scan.",
         "running_state": "Scan is running...\nCheck the log tab for progress.",
         "tab_summary": "Summary",
+        "tab_sensitive": "Sensitive",
         "tab_js": "JS Files",
         "tab_page": "Pages",
         "tab_api": "APIs",
@@ -240,11 +266,27 @@ UI_TEXTS = {
         "header_method": "Method",
         "header_path": "Path",
         "header_source": "Source",
+        "header_sensitive_type": "Type",
+        "header_masked_value": "Masked value",
+        "header_confidence": "Confidence",
+        "header_severity": "Severity",
+        "header_location": "Location",
         "quick_success_only": "Success only",
         "quick_accessible_only": "Accessible only",
+        "quick_high_only": "High only",
         "status_200_only": "Status 200 only",
         "filter": "Filter",
+        "filter_type": "Type",
         "all": "All",
+        "sensitive_type_all": "All",
+        "sensitive_type_email": "Email",
+        "sensitive_type_phone": "Phone",
+        "sensitive_type_name": "Name",
+        "sensitive_type_account": "Account",
+        "sensitive_type_credential": "Credential",
+        "sensitive_type_token": "Token",
+        "sensitive_type_user_id": "User ID",
+        "sensitive_type_other": "Other",
         "search_placeholder": "Enter search text",
         "reset": "Reset",
         "count_label": "Shown {visible} / Total {total}",
@@ -287,6 +329,25 @@ SCAN_STATUS_LABELS = {
 
 JS_HEADER_KEYS = ("header_depth", "header_status", "header_success", "header_length", "header_error", "header_url")
 RESULT_HEADER_KEYS = ("header_status", "header_accessible", "header_method", "header_path", "header_source", "header_url")
+SENSITIVE_HEADER_KEYS = (
+    "header_sensitive_type",
+    "header_masked_value",
+    "header_confidence",
+    "header_severity",
+    "header_source",
+    "header_location",
+)
+SENSITIVE_TYPE_FILTER_KEYS = (
+    ("all", "sensitive_type_all"),
+    ("email", "sensitive_type_email"),
+    ("phone", "sensitive_type_phone"),
+    ("name", "sensitive_type_name"),
+    ("account", "sensitive_type_account"),
+    ("credential", "sensitive_type_credential"),
+    ("token", "sensitive_type_token"),
+    ("user_id", "sensitive_type_user_id"),
+    ("other", "sensitive_type_other"),
+)
 
 
 def _normalize_ui_language(value: object) -> str:
@@ -322,6 +383,93 @@ def _safe_int(value: object, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_sensitive_type(value: object) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    if not normalized:
+        return "other"
+    mapping = {
+        "email": "email",
+        "e_mail": "email",
+        "phone": "phone",
+        "tel": "phone",
+        "mobile": "phone",
+        "person_name": "name",
+        "fullname": "name",
+        "full_name": "name",
+        "displayname": "name",
+        "display_name": "name",
+        "name": "name",
+        "account": "account",
+        "account_id": "account",
+        "account_like_id": "account",
+        "credential": "credential",
+        "credentials": "credential",
+        "credential_like_string": "credential",
+        "password": "credential",
+        "passwd": "credential",
+        "pwd": "credential",
+        "secret": "credential",
+        "token": "token",
+        "access_token": "token",
+        "refreshtoken": "token",
+        "refresh_token": "token",
+        "api_key": "token",
+        "apikey": "token",
+        "bearer": "token",
+        "jwt": "token",
+        "user_id": "user_id",
+        "userid": "user_id",
+        "username": "user_id",
+        "loginid": "user_id",
+        "login_id": "user_id",
+    }
+    return mapping.get(normalized, "other")
+
+
+def _normalize_sensitive_severity(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"critical", "high", "medium", "low"}:
+        return normalized
+    if normalized in {"severe", "sev_high"}:
+        return "high"
+    if normalized in {"mid", "med"}:
+        return "medium"
+    if normalized:
+        return normalized
+    return "low"
+
+
+def _mask_sensitive_value(value: object, finding_type: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    kind = _normalize_sensitive_type(finding_type)
+    if kind == "email":
+        local, sep, domain = text.partition("@")
+        if not sep:
+            return "***"
+        visible = local[:1]
+        return f"{visible}{'*' * max(3, len(local) - 1)}@{domain}"
+    if kind == "phone":
+        digits = [idx for idx, char in enumerate(text) if char.isdigit()]
+        if len(digits) < 7:
+            return "***"
+        masked_chars = list(text)
+        for idx in digits[3:-2]:
+            masked_chars[idx] = "*"
+        return "".join(masked_chars)
+    if len(text) <= 4:
+        return "*" * len(text)
+    return f"{text[:2]}{'*' * max(3, len(text) - 4)}{text[-2:]}"
 
 
 def _status_text(status_code: object) -> str:
@@ -450,6 +598,7 @@ class DiscoveryWindow(QMainWindow):
         self.js_rows: List[Tuple[str, str, str, str, str, str]] = []
         self.page_rows: List[Tuple[str, str, str, str, str, str]] = []
         self.api_rows: List[Tuple[str, str, str, str, str, str]] = []
+        self.sensitive_records: List[dict] = []
 
         self._build_ui(initial_url=initial_url, initial_output=initial_output)
         self._sync_theme_toggle()
@@ -572,6 +721,19 @@ class DiscoveryWindow(QMainWindow):
         bundle.count_label.setText(self.tr("count_label", visible=0, total=0))
         bundle.table.setHorizontalHeaderLabels(headers)
 
+    def _localize_sensitive_type_filter(self) -> None:
+        if not hasattr(self, "sensitive_type_combo"):
+            return
+        current_value = self.sensitive_type_combo.currentData()
+        self.sensitive_type_label.setText(self.tr("filter_type"))
+        self.sensitive_type_combo.blockSignals(True)
+        self.sensitive_type_combo.clear()
+        for value, key in SENSITIVE_TYPE_FILTER_KEYS:
+            self.sensitive_type_combo.addItem(self.tr(key), value)
+        target_index = self.sensitive_type_combo.findData(current_value)
+        self.sensitive_type_combo.setCurrentIndex(0 if target_index < 0 else target_index)
+        self.sensitive_type_combo.blockSignals(False)
+
     def _refresh_language_texts(self) -> None:
         self.setWindowTitle(self.tr("window_title"))
         self._sync_language_selector()
@@ -593,9 +755,11 @@ class DiscoveryWindow(QMainWindow):
         self.recursive_depth_label.setText(self.tr("recursive_depth"))
         self.max_workers_label.setText(self.tr("max_workers"))
         self.request_delay_label.setText(self.tr("request_delay"))
+        self.proxy_label.setText(self.tr("proxy"))
         self.language_label.setText(self.tr("language"))
         self.timeout_spin.setSuffix(self.tr("timeout_suffix"))
         self.request_delay_spin.setSuffix(self.tr("timeout_suffix"))
+        self.proxy_input.setPlaceholderText(self.tr("proxy_placeholder"))
         self.recursive_scan_check.setText(self.tr("recursive_scan"))
         self.include_subdomains_check.setText(self.tr("include_subdomains"))
         self.excluded_subdomains_label.setText(self.tr("excluded_subdomains"))
@@ -612,15 +776,20 @@ class DiscoveryWindow(QMainWindow):
         self.card_page_title.setText(self.tr("metric_page"))
         self.card_api_title.setText(self.tr("metric_api"))
         self.card_recursive_title.setText(self.tr("metric_recursive"))
+        self.card_sensitive_total_title.setText(self.tr("metric_sensitive_total"))
+        self.card_sensitive_high_title.setText(self.tr("metric_sensitive_high"))
         self.empty_state_label.setText(self.tr("empty_state"))
         self.running_state_label.setText(self.tr("running_state"))
 
         self.tab_widget.setTabText(0, self.tr("tab_summary"))
-        self.tab_widget.setTabText(1, self.tr("tab_js"))
-        self.tab_widget.setTabText(2, self.tr("tab_page"))
-        self.tab_widget.setTabText(3, self.tr("tab_api"))
-        self.tab_widget.setTabText(4, self.tr("tab_log"))
+        self.tab_widget.setTabText(1, self.tr("tab_sensitive"))
+        self.tab_widget.setTabText(2, self.tr("tab_js"))
+        self.tab_widget.setTabText(3, self.tr("tab_page"))
+        self.tab_widget.setTabText(4, self.tr("tab_api"))
+        self.tab_widget.setTabText(5, self.tr("tab_log"))
 
+        self._localize_table_bundle(self.sensitive_bundle)
+        self._localize_sensitive_type_filter()
         self._localize_table_bundle(self.js_bundle)
         self._localize_table_bundle(self.page_bundle)
         self._localize_table_bundle(self.api_bundle)
@@ -756,6 +925,8 @@ class DiscoveryWindow(QMainWindow):
         self.request_delay_spin.setRange(0.0, 60.0)
         self.request_delay_spin.setSingleStep(0.1)
         self.request_delay_spin.setValue(0.0)
+        self.proxy_label = QLabel(option_card)
+        self.proxy_input = QLineEdit(option_card)
         self.skip_probe_check = QCheckBox(option_card)
         self.verify_ssl_check = QCheckBox(option_card)
         self.verify_ssl_check.setChecked(True)
@@ -790,8 +961,10 @@ class DiscoveryWindow(QMainWindow):
         grid.addWidget(self.max_workers_spin, 9, 1)
         grid.addWidget(self.request_delay_label, 10, 0)
         grid.addWidget(self.request_delay_spin, 10, 1)
-        grid.addWidget(self.language_label, 11, 0)
-        grid.addWidget(self.language_combo, 11, 1)
+        grid.addWidget(self.proxy_label, 11, 0)
+        grid.addWidget(self.proxy_input, 11, 1)
+        grid.addWidget(self.language_label, 12, 0)
+        grid.addWidget(self.language_combo, 12, 1)
         option_layout.addLayout(grid)
         self.left_layout.addWidget(option_card)
 
@@ -853,6 +1026,20 @@ class DiscoveryWindow(QMainWindow):
         cards.addWidget(self.card_api_frame, 1)
         cards.addWidget(self.card_recursive_frame, 1)
         header_layout.addLayout(cards)
+
+        sensitive_cards = QHBoxLayout()
+        sensitive_cards.setContentsMargins(0, 0, 0, 0)
+        sensitive_cards.setSpacing(10)
+        self.card_sensitive_total_frame, self.card_sensitive_total_title, self.card_sensitive_total_value = (
+            self._create_metric_card(header_card)
+        )
+        self.card_sensitive_high_frame, self.card_sensitive_high_title, self.card_sensitive_high_value = (
+            self._create_metric_card(header_card)
+        )
+        sensitive_cards.addWidget(self.card_sensitive_total_frame, 1)
+        sensitive_cards.addWidget(self.card_sensitive_high_frame, 1)
+        sensitive_cards.addStretch(2)
+        header_layout.addLayout(sensitive_cards)
         parent_layout.addWidget(header_card)
 
     def _init_right_body(self, parent_layout: QVBoxLayout) -> None:
@@ -893,6 +1080,32 @@ class DiscoveryWindow(QMainWindow):
         self.summary_text = QTextEdit(content_page)
         self.summary_text.setReadOnly(True)
         self.tab_widget.addTab(self.summary_text, "")
+
+        self.sensitive_bundle = self._create_table_tab(
+            header_keys=SENSITIVE_HEADER_KEYS,
+            quick_filter_key="quick_high_only",
+            quick_filter_attr="sensitive_high_only_check",
+            on_apply=self._apply_sensitive_filters,
+            parent=content_page,
+        )
+        self.sensitive_tab = self.sensitive_bundle.widget
+        self.sensitive_filter_col = self.sensitive_bundle.filter_col
+        self.sensitive_filter_text = self.sensitive_bundle.filter_text
+        self.sensitive_count_label = self.sensitive_bundle.count_label
+        self.sensitive_table = self.sensitive_bundle.table
+        self.sensitive_table.setColumnWidth(0, 120)
+        self.sensitive_table.setColumnWidth(1, 240)
+        self.sensitive_table.setColumnWidth(2, 90)
+        self.sensitive_table.setColumnWidth(3, 90)
+        self.sensitive_table.setColumnWidth(4, 320)
+        self.sensitive_table.setColumnWidth(5, 220)
+        sensitive_filter_bar = self.sensitive_tab.layout().itemAt(0).layout()
+        self.sensitive_type_label = QLabel(self.sensitive_tab)
+        self.sensitive_type_combo = QComboBox(self.sensitive_tab)
+        self.sensitive_type_combo.currentIndexChanged.connect(lambda _: self._apply_sensitive_filters())
+        sensitive_filter_bar.insertWidget(3, self.sensitive_type_label)
+        sensitive_filter_bar.insertWidget(4, self.sensitive_type_combo)
+        self.tab_widget.addTab(self.sensitive_tab, "")
 
         self.js_bundle = self._create_table_tab(
             header_keys=JS_HEADER_KEYS,
@@ -1058,6 +1271,9 @@ class DiscoveryWindow(QMainWindow):
             self.page_status_200_check.setChecked(False)
         elif check is getattr(self, "api_accessible_only_check", None):
             self.api_status_200_check.setChecked(False)
+        elif check is getattr(self, "sensitive_high_only_check", None):
+            if hasattr(self, "sensitive_type_combo"):
+                self.sensitive_type_combo.setCurrentIndex(0)
         on_apply()
 
     def _apply_styles(self) -> None:
@@ -1432,15 +1648,22 @@ class DiscoveryWindow(QMainWindow):
         self._set_summary_card(self.card_page_value, 0)
         self._set_summary_card(self.card_api_value, 0)
         self._set_summary_card(self.card_recursive_value, 0)
+        self._set_summary_card(self.card_sensitive_total_value, 0)
+        self._set_summary_card(self.card_sensitive_high_value, 0)
         self.js_rows = []
         self.page_rows = []
         self.api_rows = []
+        self.sensitive_records = []
+        if hasattr(self, "sensitive_type_combo"):
+            self.sensitive_type_combo.setCurrentIndex(0)
         self._populate_table(self.js_table, [])
         self._populate_table(self.page_table, [])
         self._populate_table(self.api_table, [])
+        self._populate_table(self.sensitive_table, [])
         self._update_filter_count(self.js_count_label, 0, 0)
         self._update_filter_count(self.page_count_label, 0, 0)
         self._update_filter_count(self.api_count_label, 0, 0)
+        self._update_filter_count(self.sensitive_count_label, 0, 0)
 
     def _build_ready_message(self, batch_result: dict) -> str:
         result_count = len(batch_result.get("results", []))
@@ -1491,6 +1714,7 @@ class DiscoveryWindow(QMainWindow):
                     request_delay=self.request_delay_spin.value(),
                     headers=headers,
                     verify_ssl=self.verify_ssl_check.isChecked(),
+                    proxy_url=self.proxy_input.text().strip(),
                 ),
             )
             validate_config(request.config)
@@ -1641,6 +1865,9 @@ class DiscoveryWindow(QMainWindow):
         self._set_summary_card(self.card_page_value, summary.get("page_count", 0))
         self._set_summary_card(self.card_api_value, summary.get("api_count", 0))
         self._set_summary_card(self.card_recursive_value, result.get("recursive_total_scans", 0))
+        sensitive_total, sensitive_high = self._resolve_sensitive_metrics(result, summary)
+        self._set_summary_card(self.card_sensitive_total_value, sensitive_total)
+        self._set_summary_card(self.card_sensitive_high_value, sensitive_high)
 
         if self.batch_result and len(self.batch_result.get("results", [])) > 1:
             summary_text = build_batch_summary_text(
@@ -1665,7 +1892,200 @@ class DiscoveryWindow(QMainWindow):
     def _update_filter_count(self, label: QLabel, visible: int, total: int) -> None:
         label.setText(self.tr("count_label", visible=visible, total=total))
 
+    def _extract_sensitive_findings(self, result: dict) -> List[dict]:
+        sensitive_raw = result.get("sensitive_findings")
+        hardcoded_raw = result.get("hardcoded_findings")
+        sensitive = [item for item in sensitive_raw if isinstance(item, dict)] if isinstance(sensitive_raw, list) else []
+        hardcoded = [item for item in hardcoded_raw if isinstance(item, dict)] if isinstance(hardcoded_raw, list) else []
+        if sensitive and hardcoded:
+            return sensitive + [item for item in hardcoded if item not in sensitive]
+        if sensitive:
+            return sensitive
+        if hardcoded:
+            return hardcoded
+        return []
+
+    def _resolve_sensitive_metrics(self, result: dict, summary: dict) -> Tuple[int, int]:
+        findings = self._extract_sensitive_findings(result)
+        total = _safe_int(
+            summary.get("sensitive_total", summary.get("hardcoded_total", len(findings))),
+            len(findings),
+        )
+        high_default = sum(
+            1
+            for item in findings
+            if self._extract_sensitive_severity(item) in {"high", "critical"}
+        )
+        high = _safe_int(
+            summary.get(
+                "sensitive_high",
+                summary.get("sensitive_high_or_above", summary.get("hardcoded_high_or_above", high_default)),
+            ),
+            high_default,
+        )
+        return total, high
+
+    def _extract_sensitive_severity(self, item: dict) -> str:
+        classification = item.get("classification")
+        if isinstance(classification, dict):
+            value = classification.get("risk_level", item.get("severity"))
+        else:
+            value = item.get("severity")
+        return _normalize_sensitive_severity(value)
+
+    def _extract_sensitive_type(self, item: dict) -> Tuple[str, str]:
+        classification = item.get("classification")
+        if isinstance(classification, dict):
+            raw_type = (
+                item.get("type")
+                or item.get("category")
+                or classification.get("entity_type")
+                or classification.get("subtype")
+                or item.get("subtype")
+                or ""
+            )
+        else:
+            raw_type = item.get("type") or item.get("category") or item.get("subtype") or ""
+        canonical = _normalize_sensitive_type(raw_type)
+        return canonical, str(raw_type or canonical)
+
+    def _sensitive_type_text(self, canonical_type: str, raw_type: str) -> str:
+        key_map = {
+            "email": "sensitive_type_email",
+            "phone": "sensitive_type_phone",
+            "name": "sensitive_type_name",
+            "account": "sensitive_type_account",
+            "credential": "sensitive_type_credential",
+            "token": "sensitive_type_token",
+            "user_id": "sensitive_type_user_id",
+            "other": "sensitive_type_other",
+        }
+        if canonical_type in key_map:
+            return self.tr(key_map[canonical_type])
+        return raw_type or self.tr("sensitive_type_other")
+
+    def _extract_sensitive_source(self, item: dict) -> str:
+        source_kind = str(item.get("source_kind") or item.get("source_type") or "").strip()
+        source_label = str(
+            item.get("source_label")
+            or item.get("source_url")
+            or item.get("source_path")
+            or item.get("url")
+            or ""
+        ).strip()
+        if source_kind and source_label:
+            return f"{source_kind} | {source_label}"
+        if source_label:
+            return source_label
+        if source_kind:
+            return source_kind
+        return "-"
+
+    def _extract_sensitive_location(self, item: dict) -> str:
+        label = str(item.get("location_label") or "").strip()
+        if label:
+            return label
+
+        location = item.get("location")
+        if isinstance(location, dict):
+            line = location.get("line")
+            column = location.get("column")
+            if line is not None and column is not None:
+                return f"line {line}, col {column}"
+            if line is not None:
+                return f"line {line}"
+            block_index = location.get("block_index")
+            if block_index is not None:
+                return f"block #{block_index}"
+            start = location.get("offset_start")
+            end = location.get("offset_end")
+            if start is not None and end is not None:
+                return f"offset {start}-{end}"
+
+        line = item.get("line")
+        column = item.get("column")
+        if line is not None and column is not None:
+            return f"line {line}, col {column}"
+        if line is not None:
+            return f"line {line}"
+        return "-"
+
+    def _extract_sensitive_confidence(self, item: dict) -> str:
+        classification = item.get("classification")
+        if isinstance(classification, dict):
+            raw = classification.get("confidence", item.get("confidence"))
+        else:
+            raw = item.get("confidence")
+        if raw is None:
+            return "-"
+        score = _safe_float(raw, -1.0)
+        if score < 0:
+            return "-"
+        if score > 1:
+            return f"{score:.1f}%"
+        return f"{score:.2f}"
+
+    def _extract_sensitive_masked_value(self, item: dict, finding_type: str) -> str:
+        masked = item.get("masked_value")
+        if masked is None:
+            masked = item.get("maskedValue")
+        if masked is not None and str(masked).strip():
+            return str(masked).strip()
+        raw = item.get("value", item.get("raw_value"))
+        if raw is None:
+            raw = ""
+        return _mask_sensitive_value(raw, finding_type)
+
+    def _extract_sensitive_records(self, result: dict) -> List[dict]:
+        records: List[dict] = []
+        for item in self._extract_sensitive_findings(result):
+            canonical_type, raw_type = self._extract_sensitive_type(item)
+            severity = self._extract_sensitive_severity(item)
+            display_type = self._sensitive_type_text(canonical_type, raw_type)
+            masked_value = self._extract_sensitive_masked_value(item, canonical_type)
+            confidence_text = self._extract_sensitive_confidence(item)
+            source_text = self._extract_sensitive_source(item)
+            location_text = self._extract_sensitive_location(item)
+            records.append(
+                {
+                    "type": canonical_type,
+                    "severity": severity,
+                    "row": (
+                        display_type,
+                        masked_value,
+                        confidence_text,
+                        severity,
+                        source_text,
+                        location_text,
+                    ),
+                }
+            )
+        return records
+
+    def _sensitive_record_matches_search(self, record: dict, filter_column: Optional[str], filter_text: str) -> bool:
+        keyword = filter_text.strip().casefold()
+        if not keyword:
+            return True
+
+        row = record.get("row") or ()
+        columns = self._localized_headers(SENSITIVE_HEADER_KEYS)
+        if not filter_column:
+            target_indexes = range(len(row))
+        else:
+            try:
+                target_indexes = [columns.index(filter_column)]
+            except ValueError:
+                target_indexes = range(len(row))
+        for index in target_indexes:
+            if index >= len(row):
+                continue
+            if keyword in str(row[index]).casefold():
+                return True
+        return False
+
     def _rebuild_tables(self, result: dict) -> None:
+        self.sensitive_records = self._extract_sensitive_records(result)
+
         self.js_rows = []
         for item in result.get("js_files", []):
             self.js_rows.append(
@@ -1705,9 +2125,29 @@ class DiscoveryWindow(QMainWindow):
                 )
             )
 
+        self._apply_sensitive_filters()
         self._apply_js_filters()
         self._apply_page_filters()
         self._apply_api_filters()
+
+    def _apply_sensitive_filters(self) -> None:
+        filter_column = None if self.sensitive_filter_col.currentIndex() == 0 else self.sensitive_filter_col.currentText()
+        filter_text = self.sensitive_filter_text.text()
+        selected_type = str(self.sensitive_type_combo.currentData() or "all")
+
+        records = [
+            record
+            for record in self.sensitive_records
+            if self._sensitive_record_matches_search(record, filter_column, filter_text)
+        ]
+        if self.sensitive_high_only_check.isChecked():
+            records = [record for record in records if record.get("severity") in {"high", "critical"}]
+        if selected_type != "all":
+            records = [record for record in records if record.get("type") == selected_type]
+
+        rows = [record.get("row", ()) for record in records]
+        self._update_filter_count(self.sensitive_count_label, len(rows), len(self.sensitive_records))
+        self._populate_table(self.sensitive_table, rows)
 
     def _apply_js_filters(self) -> None:
         filter_column = None if self.js_filter_col.currentIndex() == 0 else self.js_filter_col.currentText()

@@ -1012,32 +1012,6 @@ def _normalize_hardcoded_value(category: str, value: str) -> str:
     return raw.strip()
 
 
-def _mask_hardcoded_value(category: str, value: str) -> str:
-    raw = str(value or "")
-    if not raw:
-        return ""
-    if category == "email" and "@" in raw:
-        local, domain = raw.split("@", 1)
-        if len(local) <= 1:
-            return f"* @{domain}".replace(" ", "")
-        return f"{local[:1]}***@{domain}"
-    if category == "phone":
-        digits = re.sub(r"\D", "", raw)
-        if len(digits) <= 7:
-            return "*" * len(digits)
-        return f"{digits[:3]}-****-{digits[-4:]}"
-    if category == "person_name":
-        compact = re.sub(r"\s+", " ", raw).strip()
-        if len(compact) <= 1:
-            return "*"
-        if len(compact) == 2:
-            return f"{compact[0]}*"
-        return f"{compact[0]}***{compact[-1]}"
-    if len(raw) <= 4:
-        return "*" * len(raw)
-    return f"{raw[:2]}***{raw[-2:]}"
-
-
 def _is_placeholder_hardcoded_value(category: str, value: str, normalized_value: str) -> bool:
     lowered = str(value or "").strip().lower()
     normalized = str(normalized_value or "").strip().lower()
@@ -1202,7 +1176,7 @@ def _append_hardcoded_finding(
             "category": category,
             "field_name": field_name,
             "value": value,
-            "masked_value": _mask_hardcoded_value(category, value),
+            "masked_value": value,
             "normalized_value": normalized_value,
             "source_type": source_type,
             "source_url": source_url,
@@ -2364,7 +2338,7 @@ def build_hardcoded_sheet_rows(rows_data: List[dict]) -> List[List[object]]:
             "신뢰도",
             "범주",
             "필드",
-            "마스킹 값",
+            "값",
             "원본 유형",
             "라인",
             "열",
@@ -2381,7 +2355,7 @@ def build_hardcoded_sheet_rows(rows_data: List[dict]) -> List[List[object]]:
                 item.get("confidence", ""),
                 item.get("category", ""),
                 item.get("field_name", ""),
-                item.get("masked_value", ""),
+                item.get("value", item.get("masked_value", "")),
                 item.get("source_type", ""),
                 item.get("line", ""),
                 item.get("column", ""),

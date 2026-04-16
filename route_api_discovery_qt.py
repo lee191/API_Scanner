@@ -135,7 +135,7 @@ UI_TEXTS = {
         "header_path": "경로",
         "header_source": "출처",
         "header_sensitive_type": "유형",
-        "header_masked_value": "마스킹값",
+        "header_masked_value": "값",
         "header_confidence": "신뢰도",
         "header_severity": "심각도",
         "header_location": "위치",
@@ -267,7 +267,7 @@ UI_TEXTS = {
         "header_path": "Path",
         "header_source": "Source",
         "header_sensitive_type": "Type",
-        "header_masked_value": "Masked value",
+        "header_masked_value": "Value",
         "header_confidence": "Confidence",
         "header_severity": "Severity",
         "header_location": "Location",
@@ -446,30 +446,6 @@ def _normalize_sensitive_severity(value: object) -> str:
     if normalized:
         return normalized
     return "low"
-
-
-def _mask_sensitive_value(value: object, finding_type: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return "-"
-    kind = _normalize_sensitive_type(finding_type)
-    if kind == "email":
-        local, sep, domain = text.partition("@")
-        if not sep:
-            return "***"
-        visible = local[:1]
-        return f"{visible}{'*' * max(3, len(local) - 1)}@{domain}"
-    if kind == "phone":
-        digits = [idx for idx, char in enumerate(text) if char.isdigit()]
-        if len(digits) < 7:
-            return "***"
-        masked_chars = list(text)
-        for idx in digits[3:-2]:
-            masked_chars[idx] = "*"
-        return "".join(masked_chars)
-    if len(text) <= 4:
-        return "*" * len(text)
-    return f"{text[:2]}{'*' * max(3, len(text) - 4)}{text[-2:]}"
 
 
 def _status_text(status_code: object) -> str:
@@ -2025,16 +2001,16 @@ class DiscoveryWindow(QMainWindow):
             return f"{score:.1f}%"
         return f"{score:.2f}"
 
-    def _extract_sensitive_masked_value(self, item: dict, finding_type: str) -> str:
+    def _extract_sensitive_display_value(self, item: dict) -> str:
+        raw = item.get("value", item.get("raw_value"))
+        if raw is not None and str(raw).strip():
+            return str(raw).strip()
         masked = item.get("masked_value")
         if masked is None:
             masked = item.get("maskedValue")
         if masked is not None and str(masked).strip():
             return str(masked).strip()
-        raw = item.get("value", item.get("raw_value"))
-        if raw is None:
-            raw = ""
-        return _mask_sensitive_value(raw, finding_type)
+        return "-"
 
     def _extract_sensitive_records(self, result: dict) -> List[dict]:
         records: List[dict] = []
@@ -2042,7 +2018,7 @@ class DiscoveryWindow(QMainWindow):
             canonical_type, raw_type = self._extract_sensitive_type(item)
             severity = self._extract_sensitive_severity(item)
             display_type = self._sensitive_type_text(canonical_type, raw_type)
-            masked_value = self._extract_sensitive_masked_value(item, canonical_type)
+            display_value = self._extract_sensitive_display_value(item)
             confidence_text = self._extract_sensitive_confidence(item)
             source_text = self._extract_sensitive_source(item)
             location_text = self._extract_sensitive_location(item)
@@ -2052,7 +2028,7 @@ class DiscoveryWindow(QMainWindow):
                     "severity": severity,
                     "row": (
                         display_type,
-                        masked_value,
+                        display_value,
                         confidence_text,
                         severity,
                         source_text,

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import hashlib
 import ipaddress
 import json
 import re
@@ -221,6 +222,7 @@ class Config:
     headers: Dict[str, str] = field(default_factory=dict)
     verify_ssl: bool = True
     proxy_url: str = ""
+    js_output_dir: Optional[Path] = None
 
 
 @dataclass
@@ -290,6 +292,7 @@ class ProbeResult:
     status_code: Optional[int]
     method: Optional[str]
     error: Optional[str]
+    length: int = 0
 
 
 @dataclass
@@ -360,6 +363,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max-workers", type=int, default=1, help="동시에 처리할 최대 요청 작업 수(기본값: 1)")
     parser.add_argument("--request-delay", type=float, default=0.0, help="요청 시작 간 최소 딜레이(초, 기본값: 0)")
     parser.add_argument("--proxy", type=str, default="", help="프록시 URL(http://host:port 또는 https://host:port)")
+    parser.add_argument("--save-js-dir", type=Path, default=None, help="가져온 JS 파일 본문을 저장할 디렉터리")
     parser.add_argument("--no-verify-ssl", action="store_true", help="SSL 인증서 검증을 건너뜁니다(자체 서명 인증서 허용).")
     parser.add_argument("--debug", action="store_true", help="오류 발생 시 traceback을 함께 출력합니다.")
 
@@ -385,6 +389,7 @@ def build_config(args: argparse.Namespace) -> Config:
         request_delay=max(0.0, args.request_delay),
         verify_ssl=not args.no_verify_ssl,
         proxy_url=str(args.proxy or "").strip(),
+        js_output_dir=args.save_js_dir,
     )
     validate_config(config)
     return config
@@ -403,12 +408,26 @@ def validate_config(config: Config) -> None:
         raise ValueError("요청 딜레이는 0 이상이어야 합니다.")
     validate_proxy_url(config.proxy_url)
     validate_output_path(config.output)
+    validate_js_output_dir(config.js_output_dir)
 
 
 def validate_output_path(output: Path) -> None:
     suffix = output.suffix.lower()
     if suffix not in SUPPORTED_OUTPUT_SUFFIXES:
         raise ValueError("지원하지 않는 출력 형식입니다. `.json`, `.xlsx`, 또는 확장자 없이 입력해 주세요.")
+
+
+def validate_js_output_dir(output_dir: Optional[Path]) -> None:
+    if output_dir is None:
+        return
+    path = Path(output_dir).expanduser()
+    for part in path.parts:
+        if part in {path.anchor, path.drive, path.root}:
+            continue
+        if is_windows_reserved_filename(part):
+            raise ValueError("JS 저장 경로에 Windows 예약 이름을 사용할 수 없습니다.")
+    if path.exists() and not path.is_dir():
+        raise ValueError("JS 저장 경로는 디렉터리여야 합니다.")
 
 
 def validate_proxy_url(proxy_url: str) -> None:
@@ -418,6 +437,69 @@ def validate_proxy_url(proxy_url: str) -> None:
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
         raise ValueError("프록시 URL은 `http://host:port` 또는 `https://host:port` 형식이어야 합니다.")
+
+
+WINDOWS_RESERVED_FILENAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+}
+
+
+def normalize_js_output_dir(output_dir: Optional[Path]) -> Optional[Path]:
+    if output_dir is None:
+        return None
+    return Path(output_dir).expanduser().resolve()
+
+
+def is_windows_reserved_filename(value: str) -> bool:
+    name = str(value or "").strip().rstrip(" .")
+    if not name:
+        return False
+    return name.split(".", 1)[0].upper() in WINDOWS_RESERVED_FILENAMES
+
+
+def build_saved_js_filename(script_url: str, sequence: int) -> str:
+    parsed = urlparse(script_url)
+    raw_name = Path(parsed.path).name or "script.js"
+    suffix = Path(raw_name).suffix.lower()
+    if suffix not in {".js", ".mjs"}:
+        suffix = ".js"
+
+    stem = Path(raw_name).stem if Path(raw_name).stem else "script"
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-") or "script"
+    if is_windows_reserved_filename(stem):
+        stem = f"file_{stem}"
+    stem = stem[:80]
+    digest = hashlib.sha256(script_url.encode("utf-8")).hexdigest()[:12]
+    return f"{sequence:04d}_{stem}_{digest}{suffix}"
+
+
+def save_js_file(script_url: str, text: str, output_dir: Path, sequence: int) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename = build_saved_js_filename(script_url, sequence)
+    path = output_dir / filename
+    path.write_text(text, encoding="utf-8")
+    return path.resolve()
 
 
 def build_execution_context(config: Config) -> ExecutionContext:
@@ -537,6 +619,7 @@ def build_empty_scan_result(config: Config, url: str, error: str, status: str = 
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
         "proxy_url": config.proxy_url,
+        "js_output_dir": str(normalize_js_output_dir(config.js_output_dir) or ""),
         "status": status,
         "error": error,
         "recursive_enabled": config.recursive_scan,
@@ -558,6 +641,7 @@ def build_empty_scan_result(config: Config, url: str, error: str, status: str = 
         "summary": {
             "js_discovered": 0,
             "js_fetched": 0,
+            "js_saved": 0,
             "page_count": 0,
             "api_count": 0,
             **hardcoded_summary_fields,
@@ -579,6 +663,7 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
     totals = {
         "js_discovered": 0,
         "js_fetched": 0,
+        "js_saved": 0,
         "page_count": 0,
         "api_count": 0,
         "hardcoded_total": 0,
@@ -594,6 +679,7 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
         summary = record.get("summary") or {}
         totals["js_discovered"] += int(summary.get("js_discovered", 0) or 0)
         totals["js_fetched"] += int(summary.get("js_fetched", 0) or 0)
+        totals["js_saved"] += int(summary.get("js_saved", 0) or 0)
         totals["page_count"] += int(summary.get("page_count", 0) or 0)
         totals["api_count"] += int(summary.get("api_count", 0) or 0)
         totals["hardcoded_total"] += summary_count(summary, "hardcoded_total", "sensitive_total")
@@ -632,6 +718,7 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
         "proxy_url": config.proxy_url,
+        "js_output_dir": str(normalize_js_output_dir(config.js_output_dir) or ""),
         "result_count": len(records),
         "success_count": success_count,
         "failed_count": failed_count,
@@ -787,6 +874,18 @@ def read_response_text(response) -> str:
     return raw.decode(charset, errors="replace")
 
 
+def response_length(response, text: str) -> int:
+    if text:
+        return len(text)
+    content_length = response.headers.get("Content-Length")
+    if content_length is None:
+        return 0
+    try:
+        return max(0, int(content_length))
+    except (TypeError, ValueError):
+        return 0
+
+
 def fetch_text(
     url: str,
     timeout: float,
@@ -832,7 +931,7 @@ def fetch_text(
                 status_code=response.getcode(),
                 text=text,
                 success=True,
-                length=len(text),
+                length=response_length(response, text),
                 content_type=response.headers.get("Content-Type"),
             )
     except HTTPError as exc:
@@ -1423,16 +1522,23 @@ def probe_candidate(
             fetch_kwargs["proxy_url"] = proxy_url
         result = fetch_text(url, **fetch_kwargs)
         if result.success:
-            return ProbeResult(accessible=True, status_code=result.status_code, method=method, error=None)
+            return ProbeResult(accessible=True, status_code=result.status_code, method=method, error=None, length=result.length)
         if result.status_code in {401, 403}:
             return ProbeResult(
                 accessible=True,
                 status_code=result.status_code,
                 method=method,
                 error="인증 또는 권한이 필요합니다.",
+                length=result.length,
             )
         if result.status_code not in {405, 501, None}:
-            return ProbeResult(accessible=False, status_code=result.status_code, method=method, error=result.error)
+            return ProbeResult(
+                accessible=False,
+                status_code=result.status_code,
+                method=method,
+                error=result.error,
+                length=result.length,
+            )
     return ProbeResult(accessible=False, status_code=None, method=None, error="성공적인 프로브 응답을 받지 못했습니다.")
 
 
@@ -1465,6 +1571,7 @@ def build_result_row(
         "status_code": probe.status_code,
         "probe_method": probe.method,
         "probe_error": probe.error,
+        "length": probe.length,
         "sources": sorted(candidate.sources),
     }
 
@@ -1593,6 +1700,10 @@ def dedupe_js_rows_by_url(rows: List[dict]) -> Tuple[List[dict], int]:
             existing["status_code"] = item.get("status_code")
         if not existing.get("error") and item.get("error"):
             existing["error"] = item.get("error")
+        if not existing.get("saved_path") and item.get("saved_path"):
+            existing["saved_path"] = item.get("saved_path")
+        if not existing.get("save_error") and item.get("save_error"):
+            existing["save_error"] = item.get("save_error")
         try:
             existing_depth = int(existing.get("depth", 0) or 0)
             item_depth = int(item.get("depth", 0) or 0)
@@ -1744,6 +1855,7 @@ def combine_recursive_scan_results(
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
         "proxy_url": config.proxy_url,
+        "js_output_dir": str(normalize_js_output_dir(config.js_output_dir) or ""),
         "js_files": combined_js,
         "accessible_pages": [item for item in combined_pages if item.get("accessible") is True],
         "accessible_apis": [item for item in combined_apis if item.get("accessible") is True],
@@ -1757,6 +1869,7 @@ def combine_recursive_scan_results(
         "summary": {
             "js_discovered": len(combined_discovered_js_urls),
             "js_fetched": len(combined_js),
+            "js_saved": sum(1 for item in combined_js if item.get("saved_path")),
             "page_count": len(combined_pages),
             "api_count": len(combined_apis),
             **combined_hardcoded_summary_fields,
@@ -1806,6 +1919,8 @@ def _discover_once(
     hardcoded_findings: List[dict] = []
     hardcoded_dedupe_keys: Set[Tuple[str, str, str, str, int, int]] = set()
     successful_js_fetches = 0
+    saved_js_files = 0
+    js_output_dir = normalize_js_output_dir(config.js_output_dir)
     queue: Deque[Tuple[str, int]] = deque()
 
     script_urls, inline_scripts = extract_html_assets(html_result.text, root_url, scope)
@@ -1874,22 +1989,34 @@ def _discover_once(
         if config.proxy_url:
             js_fetch_kwargs["proxy_url"] = config.proxy_url
         js_result = fetch_text(script_url, **js_fetch_kwargs)
-        fetched_scripts.append(
-            {
-                "url": script_url,
-                "depth": depth,
-                "status_code": js_result.status_code,
-                "success": js_result.success,
-                "length": js_result.length,
-                "error": js_result.error,
-            }
-        )
+        script_record = {
+            "url": script_url,
+            "depth": depth,
+            "status_code": js_result.status_code,
+            "success": js_result.success,
+            "length": js_result.length,
+            "error": js_result.error,
+            "saved_path": "",
+            "save_error": "",
+        }
 
         # Only mark a JS URL as globally known after a successful fetch so
         # later recursive targets can retry transient failures.
         if js_result.success:
             state.known_js_urls.add(script_url)
             successful_js_fetches += 1
+            if js_output_dir is not None:
+                try:
+                    saved_path = save_js_file(script_url, js_result.text, js_output_dir, successful_js_fetches)
+                except OSError as exc:
+                    script_record["save_error"] = str(exc)
+                    emit_progress(progress, f"JS 저장 실패: {script_url} / {exc}")
+                else:
+                    saved_js_files += 1
+                    script_record["saved_path"] = str(saved_path)
+                    emit_progress(progress, f"JS 저장 완료: {saved_path}")
+
+        fetched_scripts.append(script_record)
 
         if not js_result.success or not js_result.text:
             continue
@@ -1976,6 +2103,7 @@ def _discover_once(
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
         "proxy_url": config.proxy_url,
+        "js_output_dir": str(js_output_dir or ""),
         "js_files": sorted(fetched_scripts, key=lambda item: (item["depth"], item["url"])),
         "js_discovered_urls": sorted(discovered_js_urls),
         "accessible_pages": [item for item in all_pages if item["accessible"] is True],
@@ -1989,6 +2117,7 @@ def _discover_once(
         "summary": {
             "js_discovered": len(discovered_js_urls),
             "js_fetched": len(fetched_scripts),
+            "js_saved": saved_js_files,
             "page_count": len(all_pages),
             "api_count": len(all_apis),
             **hardcoded_summary_fields,
@@ -2099,6 +2228,7 @@ def discover_many(config: Config, urls: List[str], progress: ProgressCallback = 
             headers=dict(config.headers),
             verify_ssl=config.verify_ssl,
             proxy_url=config.proxy_url,
+            js_output_dir=config.js_output_dir,
         )
         try:
             result = discover(
@@ -2200,6 +2330,8 @@ def build_batch_summary_lines(batch_result: dict, output_path: Path) -> List[str
         f"실패: {summary['failed_count']}",
         f"출력 파일: {output_path}",
         f"JS 파일 합계: {summary['js_fetched']}",
+        f"저장한 JS 파일 합계: {int(summary.get('js_saved', 0) or 0)}",
+        f"JS 저장 폴더: {batch_result.get('js_output_dir') or '-'}",
         f"페이지 후보 합계: {summary['page_count']}",
         f"API 후보 합계: {summary['api_count']}",
         f"민감정보 탐지 합계: {hardcoded_total}",
@@ -2300,7 +2432,7 @@ def build_record_group_sheet_rows(records: List[dict], output_path: Path, start_
 
 
 def build_js_sheet_rows(js_files: List[dict]) -> List[List[object]]:
-    rows: List[List[object]] = [["깊이", "상태", "성공", "길이", "오류", "URL"]]
+    rows: List[List[object]] = [["깊이", "상태", "성공", "길이", "저장 경로", "저장 오류", "오류", "URL"]]
     for item in js_files:
         rows.append(
             [
@@ -2308,6 +2440,8 @@ def build_js_sheet_rows(js_files: List[dict]) -> List[List[object]]:
                 item.get("status_code", "-"),
                 "예" if item.get("success") else "아니오",
                 item.get("length", ""),
+                item.get("saved_path", "") or "",
+                item.get("save_error", "") or "",
                 item.get("error", "") or "",
                 item.get("url", ""),
             ]
@@ -2620,6 +2754,8 @@ def build_summary_lines(result: dict, output_path: Path, language: str = "ko") -
     lines.extend(
         [
             f"{_localized_text(language, '가져온 JS 파일 수', 'Fetched JS files')}: {summary['js_fetched']}",
+            f"{_localized_text(language, '저장한 JS 파일 수', 'Saved JS files')}: {int(summary.get('js_saved', 0) or 0)}",
+            f"{_localized_text(language, 'JS 저장 폴더', 'JS output directory')}: {result.get('js_output_dir') or '-'}",
             f"{_localized_text(language, '페이지 후보 수', 'Page candidates')}: {summary['page_count']}",
             f"{_localized_text(language, 'API 후보 수', 'API candidates')}: {summary['api_count']}",
             f"{_localized_text(language, '민감정보 탐지 수', 'Hardcoded findings')}: {hardcoded_total}",
@@ -2706,7 +2842,11 @@ def print_summary(result: dict, output_path: Path) -> None:
         print("전체 목록은 결과 파일에서 확인해 주세요.")
 
 
-def gui_main(initial_url: Optional[str] = None, initial_output: Optional[str] = None) -> int:
+def gui_main(
+    initial_url: Optional[str] = None,
+    initial_output: Optional[str] = None,
+    initial_js_output_dir: Optional[str] = None,
+) -> int:
     try:
         sys.modules.setdefault("route_api_discovery", sys.modules[__name__])
         from route_api_discovery_qt import run_qt_gui
@@ -2714,7 +2854,11 @@ def gui_main(initial_url: Optional[str] = None, initial_output: Optional[str] = 
         print(f"PySide6 GUI를 사용할 수 없습니다: {exc}", file=sys.stderr)
         return 1
 
-    return run_qt_gui(initial_url=initial_url, initial_output=initial_output)
+    return run_qt_gui(
+        initial_url=initial_url,
+        initial_output=initial_output,
+        initial_js_output_dir=initial_js_output_dir,
+    )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -2722,7 +2866,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         args = parse_args(argv)
         if args.gui:
-            return gui_main(initial_url=args.url, initial_output=str(args.output))
+            return gui_main(
+                initial_url=args.url,
+                initial_output=str(args.output),
+                initial_js_output_dir=str(args.save_js_dir) if args.save_js_dir else None,
+            )
         config = build_config(args)
         if not config.verify_ssl:
             print("경고: SSL 인증서 검증이 비활성화되었습니다. 신뢰할 수 있는 대상에만 사용해 주세요.", file=sys.stderr)

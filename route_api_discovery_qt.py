@@ -88,6 +88,9 @@ UI_TEXTS = {
         "request_delay": "요청 딜레이",
         "proxy": "프록시",
         "proxy_placeholder": "예: http://127.0.0.1:8080",
+        "js_output_dir": "JS 저장 폴더",
+        "js_output_dir_placeholder": "비워두면 JS 본문을 저장하지 않습니다",
+        "choose_js_output_dir": "JS 저장 폴더 선택",
         "language": "언어",
         "language_ko": "한국어",
         "language_en": "영어",
@@ -128,6 +131,8 @@ UI_TEXTS = {
         "header_status": "상태",
         "header_success": "성공",
         "header_length": "길이",
+        "header_saved_path": "저장 경로",
+        "header_save_error": "저장 오류",
         "header_error": "오류",
         "header_url": "URL",
         "header_accessible": "접근 가능",
@@ -220,6 +225,9 @@ UI_TEXTS = {
         "request_delay": "Request delay",
         "proxy": "Proxy",
         "proxy_placeholder": "Example: http://127.0.0.1:8080",
+        "js_output_dir": "JS output folder",
+        "js_output_dir_placeholder": "Leave blank to skip saving JS bodies",
+        "choose_js_output_dir": "Choose JS output folder",
         "language": "Language",
         "language_ko": "Korean",
         "language_en": "English",
@@ -260,6 +268,8 @@ UI_TEXTS = {
         "header_status": "Status",
         "header_success": "Success",
         "header_length": "Length",
+        "header_saved_path": "Saved path",
+        "header_save_error": "Save error",
         "header_error": "Error",
         "header_url": "URL",
         "header_accessible": "Accessible",
@@ -327,8 +337,26 @@ SCAN_STATUS_LABELS = {
     "unknown": {"ko": "알 수 없음", "en": "Unknown"},
 }
 
-JS_HEADER_KEYS = ("header_depth", "header_status", "header_success", "header_length", "header_error", "header_url")
+JS_HEADER_KEYS = (
+    "header_depth",
+    "header_status",
+    "header_success",
+    "header_length",
+    "header_saved_path",
+    "header_save_error",
+    "header_error",
+    "header_url",
+)
 RESULT_HEADER_KEYS = ("header_status", "header_accessible", "header_method", "header_path", "header_source", "header_url")
+PAGE_HEADER_KEYS = (
+    "header_status",
+    "header_length",
+    "header_accessible",
+    "header_method",
+    "header_path",
+    "header_source",
+    "header_url",
+)
 SENSITIVE_HEADER_KEYS = (
     "header_sensitive_type",
     "header_masked_value",
@@ -553,7 +581,12 @@ class CellDetailDialog(QDialog):
 
 
 class DiscoveryWindow(QMainWindow):
-    def __init__(self, initial_url: Optional[str] = None, initial_output: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        initial_url: Optional[str] = None,
+        initial_output: Optional[str] = None,
+        initial_js_output_dir: Optional[str] = None,
+    ) -> None:
         super().__init__()
         self.resize(1520, 920)
         self.settings = QSettings("RouteApiDiscovery", "RouteApiDiscovery")
@@ -571,12 +604,16 @@ class DiscoveryWindow(QMainWindow):
         self.current_output_value = "-"
         self.current_output_save_failed = False
 
-        self.js_rows: List[Tuple[str, str, str, str, str, str]] = []
-        self.page_rows: List[Tuple[str, str, str, str, str, str]] = []
+        self.js_rows: List[Tuple[str, str, str, str, str, str, str, str]] = []
+        self.page_rows: List[Tuple[str, str, str, str, str, str, str]] = []
         self.api_rows: List[Tuple[str, str, str, str, str, str]] = []
         self.sensitive_records: List[dict] = []
 
-        self._build_ui(initial_url=initial_url, initial_output=initial_output)
+        self._build_ui(
+            initial_url=initial_url,
+            initial_output=initial_output,
+            initial_js_output_dir=initial_js_output_dir,
+        )
         self._sync_theme_toggle()
         self._refresh_language_texts()
         self._apply_styles()
@@ -601,7 +638,12 @@ class DiscoveryWindow(QMainWindow):
             return
         super().closeEvent(event)
 
-    def _build_ui(self, initial_url: Optional[str], initial_output: Optional[str]) -> None:
+    def _build_ui(
+        self,
+        initial_url: Optional[str],
+        initial_output: Optional[str],
+        initial_js_output_dir: Optional[str],
+    ) -> None:
         self.central = QWidget(self)
         self.setCentralWidget(self.central)
 
@@ -613,13 +655,22 @@ class DiscoveryWindow(QMainWindow):
         self.splitter.setChildrenCollapsible(False)
         root.addWidget(self.splitter, 1)
 
-        self.left_panel = self._build_left_panel(initial_url=initial_url, initial_output=initial_output)
+        self.left_panel = self._build_left_panel(
+            initial_url=initial_url,
+            initial_output=initial_output,
+            initial_js_output_dir=initial_js_output_dir,
+        )
         self.right_panel = self._build_right_panel()
         self.splitter.addWidget(self.left_panel)
         self.splitter.addWidget(self.right_panel)
         self.splitter.setSizes([360, 1160])
 
-    def _build_left_panel(self, initial_url: Optional[str], initial_output: Optional[str]) -> QWidget:
+    def _build_left_panel(
+        self,
+        initial_url: Optional[str],
+        initial_output: Optional[str],
+        initial_js_output_dir: Optional[str],
+    ) -> QWidget:
         container = QWidget(self.splitter)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -635,7 +686,11 @@ class DiscoveryWindow(QMainWindow):
         self.left_layout.setContentsMargins(0, 0, 0, 0)
         self.left_layout.setSpacing(12)
 
-        self._init_left_cards(initial_url=initial_url, initial_output=initial_output)
+        self._init_left_cards(
+            initial_url=initial_url,
+            initial_output=initial_output,
+            initial_js_output_dir=initial_js_output_dir,
+        )
         self.left_layout.addStretch(1)
         container.setMinimumWidth(340)
         container.setMaximumWidth(380)
@@ -736,6 +791,9 @@ class DiscoveryWindow(QMainWindow):
         self.timeout_spin.setSuffix(self.tr("timeout_suffix"))
         self.request_delay_spin.setSuffix(self.tr("timeout_suffix"))
         self.proxy_input.setPlaceholderText(self.tr("proxy_placeholder"))
+        self.js_output_dir_label.setText(self.tr("js_output_dir"))
+        self.js_output_dir_input.setPlaceholderText(self.tr("js_output_dir_placeholder"))
+        self.js_output_dir_button.setText(self.tr("browse"))
         self.recursive_scan_check.setText(self.tr("recursive_scan"))
         self.include_subdomains_check.setText(self.tr("include_subdomains"))
         self.excluded_subdomains_label.setText(self.tr("excluded_subdomains"))
@@ -824,7 +882,12 @@ class DiscoveryWindow(QMainWindow):
         if self.batch_result and self.batch_result.get("results"):
             self._refresh_result_selector(selected_index=selected_index)
 
-    def _init_left_cards(self, initial_url: Optional[str], initial_output: Optional[str]) -> None:
+    def _init_left_cards(
+        self,
+        initial_url: Optional[str],
+        initial_output: Optional[str],
+        initial_js_output_dir: Optional[str],
+    ) -> None:
         url_card, url_layout = self._create_card("targetCard")
         url_header = QHBoxLayout()
         url_header.setContentsMargins(0, 0, 0, 0)
@@ -903,6 +966,11 @@ class DiscoveryWindow(QMainWindow):
         self.request_delay_spin.setValue(0.0)
         self.proxy_label = QLabel(option_card)
         self.proxy_input = QLineEdit(option_card)
+        self.js_output_dir_label = QLabel(option_card)
+        self.js_output_dir_input = QLineEdit(option_card)
+        self.js_output_dir_input.setText(initial_js_output_dir or "")
+        self.js_output_dir_button = QPushButton(option_card)
+        self.js_output_dir_button.clicked.connect(self.choose_js_output_dir)
         self.skip_probe_check = QCheckBox(option_card)
         self.verify_ssl_check = QCheckBox(option_card)
         self.verify_ssl_check.setChecked(True)
@@ -939,8 +1007,14 @@ class DiscoveryWindow(QMainWindow):
         grid.addWidget(self.request_delay_spin, 10, 1)
         grid.addWidget(self.proxy_label, 11, 0)
         grid.addWidget(self.proxy_input, 11, 1)
-        grid.addWidget(self.language_label, 12, 0)
-        grid.addWidget(self.language_combo, 12, 1)
+        grid.addWidget(self.js_output_dir_label, 12, 0)
+        js_output_row = QHBoxLayout()
+        js_output_row.setContentsMargins(0, 0, 0, 0)
+        js_output_row.addWidget(self.js_output_dir_input, 1)
+        js_output_row.addWidget(self.js_output_dir_button)
+        grid.addLayout(js_output_row, 12, 1)
+        grid.addWidget(self.language_label, 13, 0)
+        grid.addWidget(self.language_combo, 13, 1)
         option_layout.addLayout(grid)
         self.left_layout.addWidget(option_card)
 
@@ -1098,7 +1172,7 @@ class DiscoveryWindow(QMainWindow):
         self.tab_widget.addTab(self.js_tab, "")
 
         self.page_bundle = self._create_table_tab(
-            header_keys=RESULT_HEADER_KEYS,
+            header_keys=PAGE_HEADER_KEYS,
             quick_filter_key="quick_accessible_only",
             quick_filter_attr="page_accessible_only_check",
             on_apply=self._apply_page_filters,
@@ -1662,6 +1736,16 @@ class DiscoveryWindow(QMainWindow):
         if chosen:
             self.output_input.setText(chosen)
 
+    def choose_js_output_dir(self) -> None:
+        default = self.js_output_dir_input.text().strip() or str(Path.cwd())
+        chosen = QFileDialog.getExistingDirectory(
+            self,
+            self.tr("choose_js_output_dir"),
+            default,
+        )
+        if chosen:
+            self.js_output_dir_input.setText(chosen)
+
     def run_scan(self) -> None:
         if self.worker_thread is not None:
             QMessageBox.information(self, self.tr("scan_in_progress_title"), self.tr("scan_in_progress_body"))
@@ -1673,6 +1757,7 @@ class DiscoveryWindow(QMainWindow):
             excluded_subdomains = parse_hostname_filters([self.excluded_subdomains_input.text()])
             output_raw = self.output_input.text().strip() or "discovery-result.json"
             output_path = Path(output_raw)
+            js_output_dir_raw = self.js_output_dir_input.text().strip()
             request = ScanRequest(
                 urls=urls,
                 config=Config(
@@ -1691,6 +1776,7 @@ class DiscoveryWindow(QMainWindow):
                     headers=headers,
                     verify_ssl=self.verify_ssl_check.isChecked(),
                     proxy_url=self.proxy_input.text().strip(),
+                    js_output_dir=Path(js_output_dir_raw) if js_output_dir_raw else None,
                 ),
             )
             validate_config(request.config)
@@ -2070,6 +2156,8 @@ class DiscoveryWindow(QMainWindow):
                     _status_text(item.get("status_code")),
                     self.tr("yes") if item.get("success") else self.tr("no"),
                     str(item.get("length", "")),
+                    str(item.get("saved_path", "") or ""),
+                    str(item.get("save_error", "") or ""),
                     str(item.get("error", "") or ""),
                     str(item.get("url", "") or ""),
                 )
@@ -2080,6 +2168,7 @@ class DiscoveryWindow(QMainWindow):
             self.page_rows.append(
                 (
                     _status_text(item.get("status_code")),
+                    str(item.get("length", "")),
                     _accessible_text(item.get("accessible"), self.ui_language),
                     str(item.get("probe_method", "") or ""),
                     str(item.get("path", "") or ""),
@@ -2142,12 +2231,12 @@ class DiscoveryWindow(QMainWindow):
         filter_column = None if self.page_filter_col.currentIndex() == 0 else self.page_filter_col.currentText()
         rows = filter_table_rows(
             rows=self.page_rows,
-            columns=self._localized_headers(RESULT_HEADER_KEYS),
+            columns=self._localized_headers(PAGE_HEADER_KEYS),
             filter_column=filter_column,
             filter_text=self.page_filter_text.text(),
         )
         if self.page_accessible_only_check.isChecked():
-            rows = [row for row in rows if row[1] == self.tr("yes")]
+            rows = [row for row in rows if row[2] == self.tr("yes")]
         if self.page_status_200_check.isChecked():
             rows = [row for row in rows if row[0] == "200"]
         self._update_filter_count(self.page_count_label, len(rows), len(self.page_rows))
@@ -2189,8 +2278,16 @@ class DiscoveryWindow(QMainWindow):
         dialog.exec()
 
 
-def run_qt_gui(initial_url: Optional[str] = None, initial_output: Optional[str] = None) -> int:
+def run_qt_gui(
+    initial_url: Optional[str] = None,
+    initial_output: Optional[str] = None,
+    initial_js_output_dir: Optional[str] = None,
+) -> int:
     app = QApplication.instance() or QApplication([])
-    window = DiscoveryWindow(initial_url=initial_url, initial_output=initial_output)
+    window = DiscoveryWindow(
+        initial_url=initial_url,
+        initial_output=initial_output,
+        initial_js_output_dir=initial_js_output_dir,
+    )
     window.show()
     return app.exec()

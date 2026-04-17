@@ -52,6 +52,7 @@ python route_api_discovery.py https://example.com
 python route_api_discovery.py https://example.com --output result.xlsx
 python route_api_discovery.py https://example.com --recursive-scan --recursive-depth 2
 python route_api_discovery.py https://example.com --proxy http://127.0.0.1:8080
+python route_api_discovery.py https://example.com --save-js-dir js-files
 python route_api_discovery.py https://example.com --no-verify-ssl
 ```
 
@@ -83,6 +84,7 @@ GUI 팁:
 - `--max-workers`: 동시 요청 수
 - `--request-delay`: 요청 시작 간 최소 지연 시간
 - `--proxy`: 프록시 URL
+- `--save-js-dir`: 성공적으로 가져온 JS 파일 본문을 저장할 디렉터리
 - `--no-verify-ssl`: SSL 인증서 검증 비활성화
 - `--skip-probe`: 후보 접근성 확인 생략
 - `--debug`: 오류 발생 시 traceback 출력

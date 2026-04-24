@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import hashlib
+from html import escape as html_escape
 import ipaddress
 import json
 import re
@@ -576,7 +577,7 @@ def parse_input_urls(text: str) -> List[str]:
         url = raw_line.strip()
         if not url:
             continue
-        if not is_http_url(url):
+        if not is_scan_target_url(url):
             raise ValueError(f"{line_number}번째 줄의 URL이 올바르지 않습니다: {url}")
         if url in seen:
             continue
@@ -750,16 +751,31 @@ def _is_disallowed_host(hostname: str) -> bool:
     return not parsed_ip.is_global
 
 
-def is_http_url(value: str) -> bool:
+def is_http_url(value: str, *, allow_disallowed_host: bool = False) -> bool:
     try:
         parsed = urlparse(value)
     except ValueError:
         return False
     hostname = parsed.hostname or ""
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc) and not _is_disallowed_host(hostname)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not hostname:
+        return False
+    return allow_disallowed_host or not _is_disallowed_host(hostname)
 
 
-def resolve_absolute_url(base_url: str, candidate: str) -> Optional[str]:
+def is_scan_target_url(value: str) -> bool:
+    return is_http_url(value, allow_disallowed_host=True)
+
+
+def should_allow_disallowed_host(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    hostname = parsed.hostname or ""
+    return bool(hostname) and _is_disallowed_host(hostname)
+
+
+def resolve_absolute_url(base_url: str, candidate: str, *, allow_disallowed_host: bool = False) -> Optional[str]:
     value = candidate.strip()
     if not value:
         return None
@@ -776,7 +792,7 @@ def resolve_absolute_url(base_url: str, candidate: str) -> Optional[str]:
         absolute = urljoin(base_url, value)
     except ValueError:
         return None
-    if not is_http_url(absolute):
+    if not is_http_url(absolute, allow_disallowed_host=allow_disallowed_host):
         return None
     return absolute
 
@@ -1015,9 +1031,10 @@ def collect_path_candidates(
     page_bucket: Dict[str, Candidate],
     api_bucket: Dict[str, Candidate],
 ) -> None:
+    allow_disallowed_host = should_allow_disallowed_host(base_url)
     for match in QUOTED_PATH_RE.finditer(text):
         raw_value = match.group("value").strip()
-        absolute = resolve_absolute_url(base_url, raw_value)
+        absolute = resolve_absolute_url(base_url, raw_value, allow_disallowed_host=allow_disallowed_host)
         if not absolute:
             continue
         if not url_matches_scope(absolute, scope):
@@ -1034,7 +1051,7 @@ def collect_path_candidates(
     for pattern in API_PATTERN_RE_LIST:
         for match in pattern.finditer(text):
             raw_value = match.group("value").strip()
-            absolute = resolve_absolute_url(base_url, raw_value)
+            absolute = resolve_absolute_url(base_url, raw_value, allow_disallowed_host=allow_disallowed_host)
             if not absolute:
                 continue
             if not url_matches_scope(absolute, scope):
@@ -1050,8 +1067,9 @@ def extract_html_assets(html: str, page_url: str, scope: UrlScope) -> Tuple[List
     parser.feed(html)
 
     script_urls: List[str] = []
+    allow_disallowed_host = should_allow_disallowed_host(page_url)
     for script_src in parser.script_srcs:
-        absolute = resolve_absolute_url(page_url, script_src)
+        absolute = resolve_absolute_url(page_url, script_src, allow_disallowed_host=allow_disallowed_host)
         # Anything declared in <script src> should be treated as a JS fetch
         # target, even when the URL itself omits a .js suffix.
         if absolute and url_matches_scope(absolute, scope):
@@ -1061,10 +1079,11 @@ def extract_html_assets(html: str, page_url: str, scope: UrlScope) -> Tuple[List
 
 def extract_additional_js_urls(script_text: str, source_url: str, scope: UrlScope) -> List[str]:
     discovered: List[str] = []
+    allow_disallowed_host = should_allow_disallowed_host(source_url)
     for pattern in JS_IMPORT_RE_LIST:
         for match in pattern.finditer(script_text):
             raw_value = match.group("value").strip()
-            absolute = resolve_absolute_url(source_url, raw_value)
+            absolute = resolve_absolute_url(source_url, raw_value, allow_disallowed_host=allow_disallowed_host)
             if absolute and url_matches_scope(absolute, scope) and should_follow_js(absolute):
                 discovered.append(absolute)
     return discovered
@@ -1509,7 +1528,7 @@ def probe_candidate(
     verify_ssl: bool = True,
     proxy_url: str = "",
 ) -> ProbeResult:
-    methods: Iterable[str] = ("HEAD", "OPTIONS", "GET") if kind == "api" else ("HEAD", "GET")
+    methods: Iterable[str] = ("GET", "POST")
     for method in methods:
         fetch_kwargs = {
             "timeout": timeout,
@@ -1886,7 +1905,7 @@ def _discover_once(
     progress: ProgressCallback = None,
 ) -> dict:
     ensure_not_cancelled(execution)
-    if not is_http_url(target_url):
+    if not is_scan_target_url(target_url):
         raise ValueError("URL은 http 또는 https 형식이어야 하며 호스트가 포함되어야 합니다.")
 
     root_url = target_url
@@ -2127,7 +2146,7 @@ def _discover_once(
 
 def discover(config: Config, progress: ProgressCallback = None, execution: Optional[ExecutionContext] = None) -> dict:
     validate_config(config)
-    if not is_http_url(config.url):
+    if not is_scan_target_url(config.url):
         raise ValueError("URL은 http 또는 https 형식이어야 하며 호스트가 포함되어야 합니다.")
 
     execution_context = execution or build_execution_context(config)
@@ -2254,6 +2273,18 @@ def write_json(output: Path, data: dict) -> Path:
     return output.resolve()
 
 
+def derive_export_output_paths(output: Path) -> Tuple[Path, Path]:
+    suffix = output.suffix.lower()
+    if suffix not in {"", ".xlsx", ".html"}:
+        raise ValueError("저장 파일 이름은 확장자 없이 입력하거나 `.xlsx` / `.html` 중 하나로 입력해 주세요.")
+    base = output.with_suffix("") if suffix else output
+    return base.with_suffix(".xlsx"), base.with_suffix(".html")
+
+
+def format_export_output_label(output_paths: Sequence[Path]) -> str:
+    return ", ".join(str(path) for path in output_paths)
+
+
 def save_result(output: Path, data: dict) -> Path:
     validate_output_path(output)
     suffix = output.suffix.lower()
@@ -2278,6 +2309,14 @@ def build_workbook_sheets(data: dict, output_path: Path) -> List[SheetSpec]:
     if "results" in data and "input_urls" in data:
         return build_batch_workbook_sheets(data, output_path)
     return build_single_workbook_sheets(data, output_path)
+
+
+def save_export_bundle(output: Path, data: dict) -> Tuple[Path, Path]:
+    xlsx_output, html_output = derive_export_output_paths(output)
+    saved_xlsx = write_xlsx(xlsx_output, data)
+    output_label = format_export_output_label((saved_xlsx, html_output.resolve()))
+    saved_html = write_html(html_output, data, output_label=output_label)
+    return saved_xlsx, saved_html
 
 
 def build_single_workbook_sheets(result: dict, output_path: Path) -> List[SheetSpec]:
@@ -2315,7 +2354,7 @@ def build_batch_workbook_sheets(batch_result: dict, output_path: Path) -> List[S
     return sheets
 
 
-def build_batch_summary_lines(batch_result: dict, output_path: Path) -> List[str]:
+def build_batch_summary_lines(batch_result: dict, output_path: Path | str) -> List[str]:
     summary = batch_result["summary"]
     dedupe = summary.get("recursive_dedupe") or {}
     excluded_subdomains = ", ".join(batch_result.get("excluded_subdomains", []) or []) or "-"
@@ -2390,7 +2429,7 @@ def build_record_sheet_base_name(record: dict, index: int, total: int) -> str:
     return "_".join(part for part in pieces if part)
 
 
-def build_record_detail_sheet_rows(record: dict, output_path: Path) -> List[List[object]]:
+def build_record_detail_sheet_rows(record: dict, output_path: Path | str) -> List[List[object]]:
     findings = resolve_sensitive_findings(record)
     rows: List[List[object]] = [[line] for line in build_summary_lines(record, output_path)]
     rows.extend([[]])
@@ -2408,7 +2447,7 @@ def build_record_detail_sheet_rows(record: dict, output_path: Path) -> List[List
     return rows
 
 
-def build_record_group_sheet_rows(records: List[dict], output_path: Path, start_index: int) -> List[List[object]]:
+def build_record_group_sheet_rows(records: List[dict], output_path: Path | str, start_index: int) -> List[List[object]]:
     rows: List[List[object]] = []
     for offset, record in enumerate(records, start=0):
         if rows:
@@ -2567,43 +2606,127 @@ def excel_column_name(index: int) -> str:
     return result
 
 
-def xlsx_cell_xml(cell_ref: str, value: object) -> str:
+def _xlsx_is_section_row(row: Sequence[object]) -> bool:
+    return len(row) == 1 and str(row[0] or "").strip().startswith("===")
+
+
+def _xlsx_is_header_row(rows: List[List[object]], row_index: int) -> bool:
+    row = rows[row_index - 1]
+    if not row or len(row) <= 1:
+        return False
+    if row_index == 1:
+        return True
+    previous = rows[row_index - 2]
+    return _xlsx_is_section_row(previous)
+
+
+def _xlsx_style_id_for_row(rows: List[List[object]], row_index: int) -> int:
+    row = rows[row_index - 1]
+    if not row:
+        return 0
+    if _xlsx_is_section_row(row):
+        return 1 if row_index == 1 else 3
+    if _xlsx_is_header_row(rows, row_index):
+        return 2
+    if len(row) == 1:
+        return 4
+    return 5
+
+
+def _xlsx_row_height(rows: List[List[object]], row_index: int) -> Optional[int]:
+    row = rows[row_index - 1]
+    if not row:
+        return None
+    if _xlsx_is_section_row(row):
+        return 26 if row_index == 1 else 22
+    if _xlsx_is_header_row(rows, row_index):
+        return 22
+    if len(row) == 1:
+        return 20
+    return None
+
+
+def _xlsx_merge_ranges(rows: List[List[object]]) -> List[str]:
+    max_columns = max((len(row) for row in rows), default=1)
+    if max_columns <= 1:
+        return []
+    last_column = excel_column_name(max_columns)
+    return [f"A{row_index}:{last_column}{row_index}" for row_index, row in enumerate(rows, start=1) if len(row) == 1 and row]
+
+
+def _xlsx_column_widths(rows: List[List[object]]) -> List[int]:
+    max_columns = max((len(row) for row in rows), default=1)
+    widths = [14] * max_columns
+    for row in rows:
+        for index, value in enumerate(row):
+            text = str(value or "")
+            estimated = min(max(len(text) + 3, 12), 48)
+            if "\n" in text:
+                estimated = min(max(max(len(part) for part in text.splitlines()) + 3, 16), 52)
+            widths[index] = max(widths[index], estimated)
+    if max_columns == 1:
+        widths[0] = max(widths[0], 72)
+    return widths
+
+
+def xlsx_cell_xml(cell_ref: str, value: object, style_id: int = 0) -> str:
     if value is None:
         return ""
+    style_attr = f' s="{style_id}"' if style_id else ""
 
     if isinstance(value, bool):
-        return f'<c r="{cell_ref}" t="b"><v>{1 if value else 0}</v></c>'
+        return f'<c r="{cell_ref}" t="b"{style_attr}><v>{1 if value else 0}</v></c>'
 
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return f'<c r="{cell_ref}"><v>{value}</v></c>'
+        return f'<c r="{cell_ref}"{style_attr}><v>{value}</v></c>'
 
     text = xml_escape(str(value), {"'": "&apos;", '"': "&quot;"})
-    return f'<c r="{cell_ref}" t="inlineStr"><is><t xml:space="preserve">{text}</t></is></c>'
+    return f'<c r="{cell_ref}" t="inlineStr"{style_attr}><is><t xml:space="preserve">{text}</t></is></c>'
 
 
 def xlsx_sheet_xml(rows: List[List[object]]) -> str:
+    column_widths = _xlsx_column_widths(rows)
+    column_xml = "".join(
+        f'<col min="{index}" max="{index}" width="{width}" customWidth="1"/>'
+        for index, width in enumerate(column_widths, start=1)
+    )
+    merge_ranges = _xlsx_merge_ranges(rows)
     row_xml_parts: List[str] = []
     for row_index, row in enumerate(rows, start=1):
+        style_id = _xlsx_style_id_for_row(rows, row_index)
+        height = _xlsx_row_height(rows, row_index)
+        row_attrs = [f'r="{row_index}"']
+        if height is not None:
+            row_attrs.append(f'ht="{height}"')
+            row_attrs.append('customHeight="1"')
         if not row:
-            row_xml_parts.append(f'<row r="{row_index}"/>')
+            row_xml_parts.append(f'<row {" ".join(row_attrs)}/>')
             continue
 
         cell_xml_parts: List[str] = []
         for column_index, value in enumerate(row, start=1):
-            cell_xml = xlsx_cell_xml(f"{excel_column_name(column_index)}{row_index}", value)
+            cell_xml = xlsx_cell_xml(f"{excel_column_name(column_index)}{row_index}", value, style_id=style_id)
             if cell_xml:
                 cell_xml_parts.append(cell_xml)
 
         if cell_xml_parts:
-            row_xml_parts.append(f'<row r="{row_index}">{"".join(cell_xml_parts)}</row>')
+            row_xml_parts.append(f'<row {" ".join(row_attrs)}>{"".join(cell_xml_parts)}</row>')
         else:
-            row_xml_parts.append(f'<row r="{row_index}"/>')
+            row_xml_parts.append(f'<row {" ".join(row_attrs)}/>')
 
+    merge_xml = ""
+    if merge_ranges:
+        merge_cells_body = "".join(f'<mergeCell ref="{ref}"/>' for ref in merge_ranges)
+        merge_xml = f'<mergeCells count="{len(merge_ranges)}">{merge_cells_body}</mergeCells>'
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+        f"<cols>{column_xml}</cols>"
         f'<sheetData>{"".join(row_xml_parts)}</sheetData>'
+        f"{merge_xml}"
+        '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>'
         "</worksheet>"
     )
 
@@ -2679,11 +2802,33 @@ def xlsx_styles_xml() -> str:
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        '<fonts count="1"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font></fonts>'
-        '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
-        '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+        '<fonts count="4">'
+        '<font><sz val="11"/><color rgb="FF0F172A"/><name val="Calibri"/><family val="2"/></font>'
+        '<font><b/><sz val="14"/><color rgb="FFFFFFFF"/><name val="Segoe UI"/><family val="2"/></font>'
+        '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Segoe UI"/><family val="2"/></font>'
+        '<font><b/><sz val="11"/><color rgb="FF1E3A5F"/><name val="Segoe UI"/><family val="2"/></font>'
+        '</fonts>'
+        '<fills count="6">'
+        '<fill><patternFill patternType="none"/></fill>'
+        '<fill><patternFill patternType="gray125"/></fill>'
+        '<fill><patternFill patternType="solid"><fgColor rgb="FF0F4C81"/><bgColor indexed="64"/></patternFill></fill>'
+        '<fill><patternFill patternType="solid"><fgColor rgb="FF2563EB"/><bgColor indexed="64"/></patternFill></fill>'
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFE0ECFF"/><bgColor indexed="64"/></patternFill></fill>'
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFF8FAFC"/><bgColor indexed="64"/></patternFill></fill>'
+        '</fills>'
+        '<borders count="2">'
+        '<border><left/><right/><top/><bottom/><diagonal/></border>'
+        '<border><left style="thin"><color rgb="FFD8E1EC"/></left><right style="thin"><color rgb="FFD8E1EC"/></right><top style="thin"><color rgb="FFD8E1EC"/></top><bottom style="thin"><color rgb="FFD8E1EC"/></bottom><diagonal/></border>'
+        '</borders>'
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-        '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+        '<cellXfs count="6">'
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf>'
+        '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+        '<xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+        '<xf numFmtId="0" fontId="3" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>'
+        '<xf numFmtId="0" fontId="0" fillId="5" borderId="1" xfId="0" applyFill="1" applyBorder="1"><alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"><alignment horizontal="left" vertical="top" wrapText="1"/></xf>'
+        '</cellXfs>'
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
         "</styleSheet>"
     )
@@ -2730,7 +2875,7 @@ def filter_table_rows(
     return filtered_rows
 
 
-def build_summary_lines(result: dict, output_path: Path, language: str = "ko") -> List[str]:
+def build_summary_lines(result: dict, output_path: Path | str, language: str = "ko") -> List[str]:
     language = _normalize_language(language)
     summary = result["summary"]
     findings = resolve_sensitive_findings(result)
@@ -2802,11 +2947,11 @@ def build_summary_lines(result: dict, output_path: Path, language: str = "ko") -
     return lines
 
 
-def build_summary_text(result: dict, output_path: Path, language: str = "ko") -> str:
+def build_summary_text(result: dict, output_path: Path | str, language: str = "ko") -> str:
     return "\n".join(build_summary_lines(result, output_path, language=language))
 
 
-def build_batch_summary_text(batch_result: dict, selected_result: dict, output_path: Path, language: str = "ko") -> str:
+def build_batch_summary_text(batch_result: dict, selected_result: dict, output_path: Path | str, language: str = "ko") -> str:
     language = _normalize_language(language)
     lines = [
         _localized_text(language, "=== 배치 요약 ===", "=== Batch Summary ==="),
@@ -2836,10 +2981,447 @@ def print_summary(result: dict, output_path: Path) -> None:
         for item in result["accessible_apis"]:
             print(f"[{item['status_code']}] {item['path']} -> {item['url']}")
 
-    if not result["accessible_pages"] and not result["accessible_apis"]:
-        print()
-        print("접근 가능한 페이지나 API를 찾지 못했거나, 프로브를 생략했습니다.")
-        print("전체 목록은 결과 파일에서 확인해 주세요.")
+
+def _build_html_summary_list(lines: Sequence[str]) -> str:
+    items = [line for line in lines if str(line).strip()]
+    return "<ul>" + "".join(f"<li>{html_escape(str(line))}</li>" for line in items) + "</ul>"
+
+
+def _build_html_summary_blocks(lines: Sequence[str]) -> str:
+    pairs: List[Tuple[str, str]] = []
+    notes: List[str] = []
+    for raw_line in lines:
+        line = str(raw_line or "").strip()
+        if not line or line.startswith("==="):
+            continue
+        if ": " in line:
+            label, value = line.split(": ", 1)
+            pairs.append((label, value))
+        else:
+            notes.append(line)
+    details = "".join(
+        f'<div class="summary-item"><dt>{html_escape(label)}</dt><dd>{html_escape(value)}</dd></div>'
+        for label, value in pairs
+    )
+    note_html = ""
+    if notes:
+        note_html = '<div class="summary-notes">' + "".join(f"<p>{html_escape(note)}</p>" for note in notes) + "</div>"
+    return f'<div class="summary-grid">{details}</div>{note_html}'
+
+
+def _build_html_metric_cards(metrics: Sequence[Tuple[str, object]]) -> str:
+    return (
+        '<div class="metric-grid">'
+        + "".join(
+            f'<article class="metric-card"><span class="metric-label">{html_escape(str(label))}</span>'
+            f'<strong class="metric-value">{html_escape(str(value))}</strong></article>'
+            for label, value in metrics
+        )
+        + "</div>"
+    )
+
+
+def _html_status_tone(status: object) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized == "success":
+        return "success"
+    if normalized == "error":
+        return "error"
+    return "neutral"
+
+
+def _build_html_status_badge(status: object) -> str:
+    normalized = str(status or "").strip().lower()
+    label = _format_status_label(normalized or status, "en") if normalized else "Unknown"
+    return f'<span class="status-badge {html_escape(_html_status_tone(normalized))}">{html_escape(label)}</span>'
+
+
+def _build_result_metric_cards(result: dict) -> str:
+    summary = result.get("summary") or {}
+    findings = resolve_sensitive_findings(result)
+    metrics = [
+        ("JS Files", summary.get("js_fetched", 0)),
+        ("Pages", summary.get("page_count", 0)),
+        ("APIs", summary.get("api_count", 0)),
+        ("Sensitive", summary_count(summary, "hardcoded_total", "sensitive_total", default=len(findings))),
+        ("High+", summary_count(summary, "hardcoded_high_or_above", "sensitive_high_or_above")),
+        ("Recursive", int(result.get("recursive_total_scans", 1) or 1)),
+    ]
+    return _build_html_metric_cards(metrics)
+
+
+def _build_batch_metric_cards(batch_result: dict) -> str:
+    summary = batch_result.get("summary") or {}
+    metrics = [
+        ("Input URLs", summary.get("input_url_count", len(batch_result.get("input_urls", [])))),
+        ("Success", summary.get("success_count", batch_result.get("success_count", 0))),
+        ("Failed", summary.get("failed_count", batch_result.get("failed_count", 0))),
+        ("JS Files", summary.get("js_fetched", 0)),
+        ("Pages", summary.get("page_count", 0)),
+        ("APIs", summary.get("api_count", 0)),
+    ]
+    return _build_html_metric_cards(metrics)
+
+
+def _build_html_table(rows: Sequence[Sequence[object]]) -> str:
+    if not rows:
+        return "<p>No data</p>"
+    header = rows[0]
+    body = rows[1:]
+    thead = "".join(f"<th>{html_escape(str(cell))}</th>" for cell in header)
+    body_rows = []
+    for row in body:
+        cells = "".join(f"<td>{html_escape(str(cell))}</td>" for cell in row)
+        body_rows.append(f"<tr>{cells}</tr>")
+    tbody = "".join(body_rows) if body_rows else "<tr><td colspan=\"100%\">-</td></tr>"
+    return f'<div class="table-wrap"><table><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table></div>'
+
+
+def _build_html_empty_state(message: str) -> str:
+    return f'<div class="empty-state">{html_escape(message)}</div>'
+
+
+def _slugify_html_anchor(value: object) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    return slug or "section"
+
+
+def _build_html_quick_nav(items: Sequence[Tuple[str, str]]) -> str:
+    links = "".join(
+        f'<a class="quick-nav-link" href="#{html_escape(anchor)}">{html_escape(label)}</a>'
+        for label, anchor in items
+        if label and anchor
+    )
+    return f'<nav class="quick-nav panel">{links}</nav>' if links else ""
+
+
+def _build_html_file_pills(output_label: Path | str) -> str:
+    values = [part.strip() for part in str(output_label or "").split(",") if part.strip()]
+    if not values:
+        values = [str(output_label or "-")]
+    return '<div class="file-pill-row">' + "".join(
+        f'<span class="file-pill">{html_escape(value)}</span>' for value in values
+    ) + "</div>"
+
+
+def _build_html_resource_preview(title: str, rows: Sequence[dict], empty_message: str) -> str:
+    if not rows:
+        return (
+            '<article class="panel inset-panel preview-panel">'
+            f"<h3>{html_escape(title)}</h3>"
+            f"{_build_html_empty_state(empty_message)}"
+            "</article>"
+        )
+    items: List[str] = []
+    for item in rows[:6]:
+        status = item.get("status_code", "-")
+        path = item.get("path", "") or "/"
+        url = item.get("url", "") or ""
+        method = item.get("probe_method", "") or ""
+        subtitle = f"{method} {url}".strip()
+        items.append(
+            '<li class="resource-item">'
+            f'<span class="resource-status">{html_escape(str(status))}</span>'
+            '<div class="resource-copy">'
+            f'<strong>{html_escape(str(path))}</strong>'
+            f'<span>{html_escape(subtitle)}</span>'
+            "</div>"
+            "</li>"
+        )
+    return (
+        '<article class="panel inset-panel preview-panel">'
+        f"<h3>{html_escape(title)}</h3>"
+        f'<ul class="resource-list">{"".join(items)}</ul>'
+        "</article>"
+    )
+
+
+def _build_html_sensitive_preview(findings: Sequence[dict]) -> str:
+    if not findings:
+        return (
+            '<article class="panel inset-panel preview-panel">'
+            "<h3>Sensitive Highlights</h3>"
+            f"{_build_html_empty_state('No sensitive findings were detected.')}"
+            "</article>"
+        )
+    severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    ranked = sorted(
+        findings,
+        key=lambda item: (
+            severity_rank.get(str(item.get("severity", "")).lower(), 0),
+            float(item.get("confidence", 0.0) or 0.0),
+        ),
+        reverse=True,
+    )
+    items: List[str] = []
+    for item in ranked[:5]:
+        severity_key = str(item.get("severity", "unknown") or "unknown").lower()
+        severity = severity_key.upper()
+        category = item.get("category") or item.get("type") or "unknown"
+        value = item.get("masked_value") or item.get("value") or "-"
+        source = item.get("source_url") or item.get("source_label") or "-"
+        items.append(
+            '<li class="finding-item">'
+            f'<span class="severity-pill severity-{html_escape(severity_key)}">{html_escape(severity)}</span>'
+            '<div class="finding-copy">'
+            f'<strong>{html_escape(str(category))}</strong>'
+            f'<span>{html_escape(str(value))}</span>'
+            f'<code>{html_escape(str(source))}</code>'
+            "</div>"
+            "</li>"
+        )
+    return (
+        '<article class="panel inset-panel preview-panel">'
+        "<h3>Sensitive Highlights</h3>"
+        f'<ul class="finding-list">{"".join(items)}</ul>'
+        "</article>"
+    )
+
+
+def _build_html_detail_block(title: str, body: str, anchor_id: str, note: str = "", *, open_by_default: bool = False) -> str:
+    open_attr = " open" if open_by_default else ""
+    note_html = f'<span class="detail-note">{html_escape(note)}</span>' if note else ""
+    return (
+        f'<details class="detail-accordion" id="{html_escape(anchor_id)}"{open_attr}>'
+        "<summary>"
+        f'<span class="detail-title">{html_escape(title)}</span>'
+        f"{note_html}"
+        "</summary>"
+        f'<div class="detail-body">{body}</div>'
+        "</details>"
+    )
+
+
+def _build_html_result_jump_cards(batch_result: dict) -> str:
+    cards: List[str] = []
+    for index, record in enumerate(batch_result.get("results", []), start=1):
+        summary = record.get("summary") or {}
+        cards.append(
+            f'<a class="result-jump-card" href="#result-{index}">'
+            '<div class="result-jump-head">'
+            f'<span class="result-jump-index">Result {index}</span>'
+            f"{_build_html_status_badge(record.get('status', 'unknown'))}"
+            "</div>"
+            f'<strong class="result-jump-url">{html_escape(str(record.get("input_url") or f"Result {index}"))}</strong>'
+            '<div class="result-jump-metrics">'
+            f'<span>JS {html_escape(str(summary.get("js_fetched", 0)))}</span>'
+            f'<span>Pages {html_escape(str(summary.get("page_count", 0)))}</span>'
+            f'<span>APIs {html_escape(str(summary.get("api_count", 0)))}</span>'
+            "</div>"
+            "</a>"
+        )
+    if not cards:
+        return _build_html_empty_state("No result records are available.")
+    return '<div class="result-jump-grid">' + "".join(cards) + "</div>"
+
+
+def _build_single_html_section(result: dict, output_label: Path | str, *, include_title: bool = False, index: int = 0) -> str:
+    anchor_base = f"result-{index}" if include_title else "overview"
+    title_text = result.get("input_url") or (f"Result {index}" if include_title else "Scan Result")
+    section_title = (
+        '<div class="section-heading">'
+        "<div>"
+        f'<p class="section-kicker">{"Selected Result" if include_title else "Overview"}</p>'
+        f'<h2>{html_escape(str(title_text))}</h2>'
+        "</div>"
+        f"{_build_html_status_badge(result.get('status', 'unknown'))}"
+        "</div>"
+    )
+    findings = resolve_sensitive_findings(result)
+    summary_lines = build_summary_lines(result, output_label, language="en")
+    accessible_pages = result.get("accessible_pages", [])
+    accessible_apis = result.get("accessible_apis", [])
+    detail_body = (
+        '<div class="detail-grid">'
+        '<div class="panel inset-panel">'
+        "<h3>JS Files</h3>"
+        f"{_build_html_table(build_js_sheet_rows(result.get('js_files', [])))}"
+        "</div>"
+        '<div class="panel inset-panel">'
+        "<h3>Pages</h3>"
+        f"{_build_html_table(build_result_sheet_rows(result.get('all_pages', [])))}"
+        "</div>"
+        '<div class="panel inset-panel">'
+        "<h3>APIs</h3>"
+        f"{_build_html_table(build_result_sheet_rows(result.get('all_apis', [])))}"
+        "</div>"
+        '<div class="panel inset-panel">'
+        "<h3>Sensitive Findings</h3>"
+        f"{_build_html_table(build_hardcoded_sheet_rows(findings))}"
+        "</div>"
+        "</div>"
+    )
+    return (
+        f'<section class="panel result-section" id="{html_escape(anchor_base)}">'
+        f"{section_title}"
+        f"{_build_result_metric_cards(result)}"
+        '<div class="content-grid summary-layout">'
+        '<div class="panel inset-panel">'
+        "<h3>Summary</h3>"
+        f"{_build_html_summary_blocks(summary_lines)}"
+        "</div>"
+        '<div class="panel inset-panel">'
+        "<h3>Exported Files</h3>"
+        f"{_build_html_file_pills(output_label)}"
+        '<p class="supporting-copy">Saving this report writes both the Excel workbook and this HTML file together.</p>'
+        "</div>"
+        "</div>"
+        '<div class="preview-grid">'
+        f"{_build_html_resource_preview('Accessible Pages', accessible_pages, 'No accessible pages were confirmed.')}"
+        f"{_build_html_resource_preview('Accessible APIs', accessible_apis, 'No accessible APIs were confirmed.')}"
+        f"{_build_html_sensitive_preview(findings)}"
+        "</div>"
+        f"{_build_html_detail_block('Detailed Tables', detail_body, f'{anchor_base}-details', note='JS / Pages / APIs / Sensitive', open_by_default=not include_title)}"
+        "</section>"
+    )
+
+
+def build_html_report(data: dict, output_label: Path | str) -> str:
+    title = "Route API Discovery Report"
+    nav_items: List[Tuple[str, str]] = [("Overview", "overview")]
+    if "results" in data and "input_urls" in data:
+        summary_html = _build_html_summary_blocks(build_batch_summary_lines(data, output_label))
+        index_html = _build_html_table(build_batch_index_sheet_rows(data))
+        sections = "".join(
+            _build_single_html_section(record, output_label, include_title=True, index=index)
+            for index, record in enumerate(data.get("results", []), start=1)
+        )
+        nav_items.append(("Results", "results"))
+        nav_items.extend((f"Result {index}", f"result-{index}") for index, _ in enumerate(data.get("results", []), start=1))
+        body = (
+            '<section class="panel hero-panel" id="overview">'
+            '<div class="hero-copy">'
+            f"<p class=\"eyebrow\">Designed Export</p><h1>{html_escape(title)}</h1>"
+            '<p class="hero-text">A bundled export for review: scan summary first, readable highlights second, full raw tables last.</p>'
+            f"{_build_html_file_pills(output_label)}"
+            "</div>"
+            f"{_build_batch_metric_cards(data)}"
+            "</section>"
+            f"{_build_html_quick_nav(nav_items)}"
+            '<section class="panel" id="results">'
+            "<h2>Batch Summary</h2>"
+            f"{summary_html}"
+            '<div class="section-heading"><h3>Results At A Glance</h3>'
+            f"{_build_html_status_badge('success' if not data.get('failed_count', 0) else 'unknown')}"
+            "</div>"
+            f"{_build_html_result_jump_cards(data)}"
+            f"{_build_html_detail_block('Batch Result Table', index_html, 'batch-table', note='Status / URL / JS / Pages / APIs')}"
+            f"</section>{sections}"
+        )
+    else:
+        nav_items.extend([("Pages / APIs / Sensitive", "overview-details")])
+        body = (
+            '<section class="panel hero-panel" id="overview">'
+            '<div class="hero-copy">'
+            f"<p class=\"eyebrow\">Designed Export</p><h1>{html_escape(title)}</h1>"
+            '<p class="hero-text">A bundled export for review: scan summary first, readable highlights second, full raw tables last.</p>'
+            f"{_build_html_file_pills(output_label)}"
+            "</div>"
+            f"{_build_result_metric_cards(data)}"
+            "</section>"
+            f"{_build_html_quick_nav(nav_items)}"
+            f"{_build_single_html_section(data, output_label)}"
+        )
+    return (
+        "<!DOCTYPE html>"
+        "<html lang=\"en\">"
+        "<head>"
+        "<meta charset=\"utf-8\">"
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{html_escape(title)}</title>"
+        "<style>"
+        ":root{color-scheme:light;--bg:#eef4fb;--panel:#ffffff;--border:#d8e1ec;--text:#0f172a;--muted:#475569;--blue:#2563eb;--navy:#0f4c81;--soft:#f8fbff;--success:#166534;--success-bg:#dcfce7;--error:#991b1b;--error-bg:#fee2e2;--neutral:#1e3a5f;--neutral-bg:#dbeafe;--amber:#b45309;--amber-bg:#fef3c7;}"
+        "*{box-sizing:border-box;}"
+        "body{margin:0;font-family:'Segoe UI',Arial,sans-serif;background:radial-gradient(circle at top left,#dbeafe 0,#eef4fb 32%,#f8fbff 100%);color:var(--text);line-height:1.55;}"
+        ".report-shell{max-width:1360px;margin:0 auto;padding:32px 20px 56px;}"
+        ".panel{background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border:1px solid rgba(216,225,236,.95);border-radius:22px;padding:22px;box-shadow:0 16px 40px rgba(15,23,42,.08);margin:0 0 18px;}"
+        ".hero-panel{background:linear-gradient(135deg,#0f4c81 0%,#2563eb 58%,#7dd3fc 100%);color:#fff;overflow:hidden;}"
+        ".hero-copy{margin-bottom:18px;}"
+        ".eyebrow{margin:0 0 8px;font-size:12px;letter-spacing:.16em;text-transform:uppercase;opacity:.82;}"
+        "h1,h2,h3{margin:0 0 12px;line-height:1.15;}"
+        "h1{font-size:34px;}"
+        "h2{font-size:24px;}"
+        "h3{font-size:16px;color:#143b63;}"
+        ".hero-text{margin:0;max-width:860px;color:rgba(255,255,255,.92);}"
+        ".quick-nav{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:10px;padding:14px 18px;background:rgba(255,255,255,.86);backdrop-filter:blur(14px);}"
+        ".quick-nav-link{display:inline-flex;align-items:center;padding:8px 12px;border-radius:999px;background:var(--soft);border:1px solid var(--border);color:var(--navy);text-decoration:none;font-weight:700;font-size:13px;}"
+        ".quick-nav-link:hover{background:#dbeafe;}"
+        ".file-pill-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;}"
+        ".file-pill{display:inline-flex;max-width:100%;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.22);font-size:13px;font-weight:700;word-break:break-all;}"
+        ".metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:14px;}"
+        ".metric-card{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);border-radius:18px;padding:14px 16px;min-height:92px;display:flex;flex-direction:column;justify-content:space-between;}"
+        ".metric-label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.78);}"
+        ".metric-value{font-size:28px;font-weight:800;color:#fff;}"
+        ".result-section .metric-grid .metric-card{background:var(--soft);border-color:var(--border);box-shadow:none;}"
+        ".result-section .metric-label{color:var(--muted);}"
+        ".result-section .metric-value{color:var(--navy);}"
+        ".content-grid{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin:14px 0;}"
+        ".summary-layout{align-items:start;}"
+        ".preview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:0 0 14px;}"
+        ".inset-panel{background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);padding:18px;border-radius:18px;box-shadow:none;margin-bottom:14px;}"
+        ".preview-panel{height:100%;}"
+        ".section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;}"
+        ".section-kicker{margin:0 0 6px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);}"
+        ".summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 14px;}"
+        ".summary-item{padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:#fff;}"
+        ".summary-item dt{margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}"
+        ".summary-item dd{margin:0;font-size:14px;font-weight:600;color:var(--text);word-break:break-word;}"
+        ".summary-notes p{margin:10px 0 0;padding:12px 14px;border-left:4px solid var(--blue);background:#fff;border-radius:12px;color:var(--muted);}"
+        ".supporting-copy{margin:14px 0 0;color:var(--muted);font-size:13px;}"
+        ".status-badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;}"
+        ".status-badge.success{background:var(--success-bg);color:var(--success);}"
+        ".status-badge.error{background:var(--error-bg);color:var(--error);}"
+        ".status-badge.neutral{background:var(--neutral-bg);color:var(--neutral);}"
+        ".empty-state{padding:18px;border:1px dashed var(--border);border-radius:16px;background:#fff;color:var(--muted);font-size:14px;}"
+        ".resource-list,.finding-list{list-style:none;margin:0;padding:0;display:grid;gap:10px;}"
+        ".resource-item,.finding-item{display:flex;gap:12px;padding:12px;border:1px solid var(--border);border-radius:16px;background:#fff;align-items:flex-start;}"
+        ".resource-status{display:inline-flex;min-width:48px;justify-content:center;padding:6px 8px;border-radius:999px;background:var(--neutral-bg);color:var(--neutral);font-weight:800;font-size:12px;}"
+        ".resource-copy,.finding-copy{display:grid;gap:4px;min-width:0;}"
+        ".resource-copy strong,.finding-copy strong{font-size:14px;color:var(--text);word-break:break-word;}"
+        ".resource-copy span,.finding-copy span{font-size:13px;color:var(--muted);word-break:break-word;}"
+        ".finding-copy code{font-family:'Cascadia Code','Consolas',monospace;font-size:12px;color:var(--navy);word-break:break-all;background:#eff6ff;border-radius:10px;padding:6px 8px;}"
+        ".severity-pill{display:inline-flex;align-items:center;padding:6px 8px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.08em;}"
+        ".severity-pill.severity-critical,.severity-pill.severity-high{background:var(--error-bg);color:var(--error);}"
+        ".severity-pill.severity-medium{background:var(--amber-bg);color:var(--amber);}"
+        ".severity-pill.severity-low,.severity-pill.severity-unknown{background:var(--neutral-bg);color:var(--neutral);}"
+        ".detail-accordion{border:1px solid var(--border);border-radius:18px;background:#fff;overflow:hidden;margin-top:14px;}"
+        ".detail-accordion summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;cursor:pointer;font-weight:800;color:var(--navy);background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);list-style:none;}"
+        ".detail-accordion summary::-webkit-details-marker{display:none;}"
+        ".detail-note{font-size:12px;font-weight:700;color:var(--muted);}"
+        ".detail-body{padding:18px;}"
+        ".detail-grid{display:grid;grid-template-columns:1fr;gap:14px;}"
+        ".result-jump-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:14px;}"
+        ".result-jump-card{display:grid;gap:10px;padding:16px;border-radius:18px;border:1px solid var(--border);background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);text-decoration:none;color:inherit;box-shadow:0 10px 24px rgba(15,23,42,.05);}"
+        ".result-jump-card:hover{transform:translateY(-1px);box-shadow:0 14px 28px rgba(15,23,42,.08);}"
+        ".result-jump-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}"
+        ".result-jump-index{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}"
+        ".result-jump-url{font-size:15px;color:var(--text);word-break:break-word;}"
+        ".result-jump-metrics{display:flex;flex-wrap:wrap;gap:8px;font-size:12px;color:var(--navy);font-weight:700;}"
+        ".table-wrap{overflow:auto;border:1px solid var(--border);border-radius:16px;background:#fff;}"
+        "table{width:100%;border-collapse:separate;border-spacing:0;min-width:760px;}"
+        "th,td{padding:11px 12px;vertical-align:top;text-align:left;font-size:13px;border-bottom:1px solid var(--border);word-break:break-word;}"
+        "th{position:sticky;top:0;background:linear-gradient(180deg,#eff6ff 0%,#e0ecff 100%);color:#143b63;font-weight:800;z-index:1;}"
+        "tbody tr:nth-child(even) td{background:#fbfdff;}"
+        "tbody tr:hover td{background:#eef6ff;}"
+        "ul{margin:0;padding-left:20px;}"
+        "@media (max-width:1100px){.preview-grid{grid-template-columns:1fr;}}"
+        "@media (max-width:960px){.content-grid{grid-template-columns:1fr;}.report-shell{padding:20px 14px 40px;}h1{font-size:28px;}.panel{padding:18px;}.quick-nav{top:0;padding:12px;}}"
+        "</style>"
+        "</head>"
+        "<body>"
+        '<main class="report-shell">'
+        f"{body}"
+        "</main>"
+        "</body>"
+        "</html>"
+    )
+
+
+def write_html(output: Path, data: dict, output_label: Optional[Path | str] = None) -> Path:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    report = build_html_report(data, output_label or output)
+    output.write_text(report, encoding="utf-8")
+    return output.resolve()
 
 
 def gui_main(

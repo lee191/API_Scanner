@@ -47,10 +47,11 @@ from route_api_discovery import (
     build_summary_text,
     discover_many,
     filter_table_rows,
+    format_export_output_label,
     parse_hostname_filters,
     parse_header_lines,
     parse_input_urls,
-    save_result,
+    save_export_bundle,
     validate_config,
 )
 
@@ -163,8 +164,8 @@ UI_TEXTS = {
         "search_placeholder": "검색어 입력",
         "reset": "초기화",
         "count_label": "표시 {visible} / 전체 {total}",
-        "save_dialog_title": "출력 파일 저장",
-        "save_dialog_filter": "결과 파일 (*.json *.xlsx);;JSON (*.json);;Excel (*.xlsx)",
+        "save_dialog_title": "내보내기 기준 이름 선택",
+        "save_dialog_filter": "내보내기 기준 이름 (*.xlsx *.html);;모든 파일 (*)",
         "scan_in_progress_title": "진행 중",
         "scan_in_progress_body": "이미 스캔이 실행 중입니다.",
         "input_error_title": "입력 오류",
@@ -174,7 +175,7 @@ UI_TEXTS = {
         "no_scan_title": "정지",
         "no_scan_body": "현재 실행 중인 스캔이 없습니다.",
         "log_cancel_requested": "[중지 요청] 현재 요청이 끝나면 스캔을 중지합니다.",
-        "log_save_completed": "저장 완료: {path}",
+        "log_save_completed": "저장 완료: {path} (Excel + HTML)",
         "scan_complete_message": "{count}개 URL 스캔 완료 (성공 {success}, 실패 {failed})",
         "log_error": "[오류] {message}",
         "execution_error_title": "실행 오류",
@@ -191,6 +192,15 @@ UI_TEXTS = {
         "yes": "예",
         "no": "아니오",
         "skipped": "생략",
+        "save_results": "결과 저장",
+        "no_results_title": "저장 불가",
+        "no_results_body": "저장할 결과가 없습니다. 먼저 스캔을 실행해 주세요.",
+        "output_not_saved": "미저장",
+        "state_saving": "저장 중",
+        "secondary_saving": "저장 중",
+        "save_in_progress_title": "저장 중",
+        "save_in_progress_body": "결과를 저장하고 있습니다. 완료된 뒤 다시 시도해 주세요.",
+        "saving_hint": "결과를 저장하고 있습니다. 잠시만 기다려 주세요.",
     },
     "en": {
         "window_title": "Route API Discovery - Precision Workbench",
@@ -300,8 +310,8 @@ UI_TEXTS = {
         "search_placeholder": "Enter search text",
         "reset": "Reset",
         "count_label": "Shown {visible} / Total {total}",
-        "save_dialog_title": "Save output file",
-        "save_dialog_filter": "Result files (*.json *.xlsx);;JSON (*.json);;Excel (*.xlsx)",
+        "save_dialog_title": "Choose export base name",
+        "save_dialog_filter": "Export base name (*.xlsx *.html);;All files (*)",
         "scan_in_progress_title": "Already Running",
         "scan_in_progress_body": "A scan is already in progress.",
         "input_error_title": "Input Error",
@@ -311,7 +321,7 @@ UI_TEXTS = {
         "no_scan_title": "Stop",
         "no_scan_body": "There is no active scan to stop.",
         "log_cancel_requested": "[Stop requested] The scan will stop after the current request finishes.",
-        "log_save_completed": "Saved: {path}",
+        "log_save_completed": "Saved: {path} (Excel + HTML)",
         "scan_complete_message": "Scanned {count} URL(s) (success {success}, failed {failed})",
         "log_error": "[Error] {message}",
         "execution_error_title": "Execution Error",
@@ -328,6 +338,15 @@ UI_TEXTS = {
         "yes": "Yes",
         "no": "No",
         "skipped": "Skipped",
+        "save_results": "Save Results",
+        "no_results_title": "Nothing to Save",
+        "no_results_body": "There are no results to save yet. Run a scan first.",
+        "output_not_saved": "Not saved",
+        "state_saving": "Saving",
+        "secondary_saving": "Saving",
+        "save_in_progress_title": "Saving",
+        "save_in_progress_body": "Results are currently being saved. Try again after it finishes.",
+        "saving_hint": "The results are being saved. Please wait a moment.",
     },
 }
 
@@ -512,8 +531,7 @@ class TableTabBundle:
 
 class ScanWorker(QObject):
     progress = Signal(str)
-    finished = Signal(object, str)
-    save_failed = Signal(object, str)
+    finished = Signal(object)
     failed = Signal(str)
     cancelled = Signal(str)
 
@@ -536,12 +554,7 @@ class ScanWorker(QObject):
             self.failed.emit(str(exc))
             return
 
-        try:
-            output_path = save_result(self.request.config.output, result)
-        except Exception as exc:
-            self.save_failed.emit(result, str(exc))
-            return
-        self.finished.emit(result, str(output_path))
+        self.finished.emit(result)
 
     def _emit_progress(self, message: str) -> None:
         self.progress.emit(message)
@@ -551,6 +564,24 @@ class ScanWorker(QObject):
 
     def is_cancel_requested(self) -> bool:
         return self.cancel_event.is_set()
+
+
+class SaveWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, output_path: Path, batch_result: dict) -> None:
+        super().__init__()
+        self.output_path = output_path
+        self.batch_result = batch_result
+
+    def run(self) -> None:
+        try:
+            saved_paths = save_export_bundle(self.output_path, self.batch_result)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(saved_paths)
 
 
 class CellDetailDialog(QDialog):
@@ -595,8 +626,11 @@ class DiscoveryWindow(QMainWindow):
 
         self.batch_result: Optional[dict] = None
         self.current_output_path: str = ""
+        self.default_output_path = (initial_output or "discovery-result").strip() or "discovery-result"
         self.worker_thread: Optional[QThread] = None
         self.worker: Optional[ScanWorker] = None
+        self.save_thread: Optional[QThread] = None
+        self.save_worker: Optional[SaveWorker] = None
         self.state_mode = "idle"
         self.last_error_message = ""
         self.last_save_failed = False
@@ -634,6 +668,14 @@ class DiscoveryWindow(QMainWindow):
                     self.tr("close_scan_wait_title"),
                     self.tr("close_scan_wait_body"),
                 )
+            event.ignore()
+            return
+        if self.save_thread is not None and self.save_thread.isRunning():
+            QMessageBox.information(
+                self,
+                self.tr("save_in_progress_title"),
+                self.tr("save_in_progress_body"),
+            )
             event.ignore()
             return
         super().closeEvent(event)
@@ -732,7 +774,14 @@ class DiscoveryWindow(QMainWindow):
     def _set_current_output(self, value: str, save_failed: bool = False) -> None:
         self.current_output_value = value
         self.current_output_save_failed = save_failed
-        display_value = self.tr("output_save_failed") if save_failed else value
+        if save_failed:
+            display_value = self.tr("output_save_failed")
+        elif value:
+            display_value = value
+        elif self.batch_result:
+            display_value = self.tr("output_not_saved")
+        else:
+            display_value = "-"
         self.current_output_label.setText(self.tr("current_output", value=display_value))
 
     def _localize_table_bundle(self, bundle: TableTabBundle) -> None:
@@ -774,10 +823,6 @@ class DiscoveryWindow(QMainWindow):
         self.stop_button.setText(self.tr("stop"))
         self.url_input.setPlaceholderText(self.tr("url_placeholder"))
 
-        self.output_title_label.setText(self.tr("output_file"))
-        self.output_input.setPlaceholderText(self.tr("output_placeholder"))
-        self.output_button.setText(self.tr("browse"))
-
         self.header_title_label.setText(self.tr("request_headers"))
         self.option_title_label.setText(self.tr("options"))
         self.max_js_label.setText(self.tr("max_js"))
@@ -802,7 +847,7 @@ class DiscoveryWindow(QMainWindow):
         self.verify_ssl_check.setText(self.tr("verify_ssl"))
 
         self.action_title_label.setText(self.tr("execution_status"))
-        self.save_again_button.setText(self.tr("save_output_file"))
+        self.save_again_button.setText(self.tr("save_results"))
 
         self.result_selector_label.setText(self.tr("result_selector"))
         self.dark_mode_check.setText(self.tr("dark_mode"))
@@ -850,6 +895,8 @@ class DiscoveryWindow(QMainWindow):
             self._set_running_state()
         elif self.state_mode == "cancelling":
             self._set_cancelling_state()
+        elif self.state_mode == "saving":
+            self._set_saving_state()
         elif self.state_mode == "ready" and self.batch_result:
             result_count = len(self.batch_result.get("results", []))
             success_count = _safe_int(self.batch_result.get("success_count", 0), 0)
@@ -909,19 +956,6 @@ class DiscoveryWindow(QMainWindow):
         self.url_input.setPlainText((initial_url or "").strip())
         url_layout.addWidget(self.url_input)
         self.left_layout.addWidget(url_card)
-
-        output_card, output_layout = self._create_card("outputCard")
-        self.output_title_label = QLabel(output_card)
-        output_layout.addWidget(self.output_title_label)
-        output_row = QHBoxLayout()
-        self.output_input = QLineEdit(output_card)
-        self.output_input.setText(initial_output or "discovery-result.json")
-        self.output_button = QPushButton(output_card)
-        self.output_button.clicked.connect(self.choose_output_file)
-        output_row.addWidget(self.output_input, 1)
-        output_row.addWidget(self.output_button)
-        output_layout.addLayout(output_row)
-        self.left_layout.addWidget(output_card)
 
         header_card, header_layout = self._create_card("headerCard")
         self.header_title_label = QLabel(header_card)
@@ -1025,7 +1059,8 @@ class DiscoveryWindow(QMainWindow):
         self.left_state_hint.setWordWrap(True)
         action_layout.addWidget(self.left_state_hint)
         self.save_again_button = QPushButton(action_card)
-        self.save_again_button.clicked.connect(self.choose_output_file)
+        self.save_again_button.clicked.connect(self.save_results)
+        self.save_again_button.setEnabled(False)
         action_layout.addWidget(self.save_again_button)
         self.left_layout.addWidget(action_card)
 
@@ -1385,6 +1420,11 @@ class DiscoveryWindow(QMainWindow):
                 color: {chip_running_text};
                 border: 1px solid {chip_running_border};
             }}
+            QLabel#stateChip[state="saving"] {{
+                background: {chip_running_bg};
+                color: {chip_running_text};
+                border: 1px solid {chip_running_border};
+            }}
             QLabel#stateChip[state="ready"] {{
                 background: {chip_ready_bg};
                 color: {chip_ready_text};
@@ -1631,6 +1671,7 @@ class DiscoveryWindow(QMainWindow):
         self.result_selector.setEnabled(False)
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
+        self.save_again_button.setEnabled(False)
 
     def _set_running_state(self) -> None:
         self.state_mode = "running"
@@ -1644,6 +1685,7 @@ class DiscoveryWindow(QMainWindow):
         self.result_selector.setEnabled(False)
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
+        self.save_again_button.setEnabled(False)
 
     def _set_cancelling_state(self) -> None:
         self.state_mode = "cancelling"
@@ -1655,6 +1697,20 @@ class DiscoveryWindow(QMainWindow):
         self.result_selector.setEnabled(False)
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(False)
+        self.save_again_button.setEnabled(False)
+
+    def _set_saving_state(self) -> None:
+        self.state_mode = "saving"
+        self.last_error_message = ""
+        self.last_save_failed = False
+        self._update_state_chip(state="saving", text=self.tr("state_saving"))
+        self.secondary_chip.setText(self.tr("secondary_saving"))
+        self.left_state_hint.setText(self.tr("saving_hint"))
+        self.result_stack.setCurrentIndex(2)
+        self.result_selector.setEnabled(bool(self.batch_result and self.batch_result.get("results")))
+        self.run_button.setEnabled(False)
+        self.stop_button.setEnabled(False)
+        self.save_again_button.setEnabled(False)
 
     def _set_result_ready_state(self, message: str) -> None:
         self.state_mode = "ready"
@@ -1667,6 +1723,7 @@ class DiscoveryWindow(QMainWindow):
         self.result_selector.setEnabled(True)
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
+        self.save_again_button.setEnabled(True)
 
     def _set_error_state(self, message: str) -> None:
         self.state_mode = "error"
@@ -1676,6 +1733,7 @@ class DiscoveryWindow(QMainWindow):
         self.left_state_hint.setText(message)
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
+        self.save_again_button.setEnabled(self.batch_result is not None)
         if self.batch_result and self.batch_result.get("results"):
             self.result_stack.setCurrentIndex(2)
             self.result_selector.setEnabled(True)
@@ -1725,16 +1783,23 @@ class DiscoveryWindow(QMainWindow):
             failed=result_count - success_count,
         )
 
-    def choose_output_file(self) -> None:
-        default = self.output_input.text().strip() or "discovery-result.json"
+    def _get_save_output_path(self) -> Optional[Path]:
+        default_path = Path(self.default_output_path or "discovery-result")
+        if default_path.suffix.lower() in {".xlsx", ".html"}:
+            default_path = default_path.with_suffix("")
+        default = str(default_path)
         chosen, _ = QFileDialog.getSaveFileName(
             self,
             self.tr("save_dialog_title"),
             default,
             self.tr("save_dialog_filter"),
         )
-        if chosen:
-            self.output_input.setText(chosen)
+        if not chosen:
+            return None
+        chosen_path = Path(chosen)
+        if chosen_path.suffix.lower() in {".xlsx", ".html"}:
+            chosen_path = chosen_path.with_suffix("")
+        return chosen_path
 
     def choose_js_output_dir(self) -> None:
         default = self.js_output_dir_input.text().strip() or str(Path.cwd())
@@ -1750,13 +1815,14 @@ class DiscoveryWindow(QMainWindow):
         if self.worker_thread is not None:
             QMessageBox.information(self, self.tr("scan_in_progress_title"), self.tr("scan_in_progress_body"))
             return
+        if self.save_thread is not None:
+            QMessageBox.information(self, self.tr("save_in_progress_title"), self.tr("save_in_progress_body"))
+            return
 
         try:
             urls = parse_input_urls(self.url_input.toPlainText())
             headers = parse_header_lines(self.header_input.toPlainText())
             excluded_subdomains = parse_hostname_filters([self.excluded_subdomains_input.text()])
-            output_raw = self.output_input.text().strip() or "discovery-result.json"
-            output_path = Path(output_raw)
             js_output_dir_raw = self.js_output_dir_input.text().strip()
             request = ScanRequest(
                 urls=urls,
@@ -1765,7 +1831,7 @@ class DiscoveryWindow(QMainWindow):
                     max_js_files=self.max_js_spin.value(),
                     max_depth=self.max_depth_spin.value(),
                     timeout=self.timeout_spin.value(),
-                    output=output_path,
+                    output=Path("discovery-result.json"),
                     skip_probe=self.skip_probe_check.isChecked(),
                     recursive_scan=self.recursive_scan_check.isChecked(),
                     recursive_depth=self.recursive_depth_spin.value(),
@@ -1802,11 +1868,9 @@ class DiscoveryWindow(QMainWindow):
         self.worker_thread.started.connect(self.worker.run)
         self.worker.progress.connect(self._on_progress)
         self.worker.finished.connect(self._on_finished)
-        self.worker.save_failed.connect(self._on_save_failed)
         self.worker.cancelled.connect(self._on_cancelled)
         self.worker.failed.connect(self._on_failed)
         self.worker.finished.connect(self.worker_thread.quit)
-        self.worker.save_failed.connect(self.worker_thread.quit)
         self.worker.cancelled.connect(self.worker_thread.quit)
         self.worker.failed.connect(self.worker_thread.quit)
         self.worker_thread.finished.connect(self._cleanup_worker)
@@ -1829,12 +1893,12 @@ class DiscoveryWindow(QMainWindow):
     def _on_progress(self, message: str) -> None:
         self.log_text.appendPlainText(message)
 
-    def _on_finished(self, batch_result: dict, output_path: str) -> None:
+    def _on_finished(self, batch_result: dict) -> None:
         self.batch_result = batch_result
-        self.current_output_path = output_path
+        self.current_output_path = ""
         self.current_output_save_failed = False
-        self.log_text.appendPlainText(self.tr("log_save_completed", path=output_path))
-        self._set_current_output(output_path)
+        self.last_save_failed = False
+        self._set_current_output("")
         self._refresh_result_selector()
         self._set_result_ready_state(self._build_ready_message(batch_result))
 
@@ -1844,13 +1908,29 @@ class DiscoveryWindow(QMainWindow):
         self._set_error_state(message)
         QMessageBox.critical(self, self.tr("execution_error_title"), message)
 
-    def _on_save_failed(self, batch_result: dict, message: str) -> None:
-        self.batch_result = batch_result
+    def _on_save_finished(self, output_paths: object) -> None:
+        saved_paths = tuple(output_paths) if isinstance(output_paths, (list, tuple)) else ()
+        output_label = format_export_output_label([Path(path) for path in saved_paths]) if saved_paths else ""
+        selected_index = self.result_selector.currentIndex()
+        self.current_output_path = output_label
+        if saved_paths:
+            self.default_output_path = str(Path(saved_paths[0]).with_suffix(""))
+        self.current_output_save_failed = False
+        self.last_save_failed = False
+        self.log_text.appendPlainText(self.tr("log_save_completed", path=output_label))
+        self._set_current_output(output_label)
+        self._refresh_result_selector(selected_index=selected_index)
+        if self.batch_result:
+            self._set_result_ready_state(self._build_ready_message(self.batch_result))
+
+    def _on_save_failed(self, message: str) -> None:
+        selected_index = self.result_selector.currentIndex()
         self.current_output_path = ""
         self.last_save_failed = True
         self.log_text.appendPlainText(self.tr("log_save_error", message=message))
-        self._set_current_output("-", save_failed=True)
-        self._refresh_result_selector()
+        self._set_current_output("", save_failed=True)
+        self._refresh_result_selector(selected_index=selected_index)
+        batch_result = self.batch_result or {}
         result_count = len(batch_result.get("results", []))
         success_count = _safe_int(batch_result.get("success_count", 0), 0)
         self._set_error_state(self.tr("save_failed_state", message=message))
@@ -1880,6 +1960,38 @@ class DiscoveryWindow(QMainWindow):
         if self.worker_thread is not None:
             self.worker_thread.deleteLater()
             self.worker_thread = None
+
+    def _cleanup_save_worker(self) -> None:
+        if self.save_worker is not None:
+            self.save_worker.deleteLater()
+            self.save_worker = None
+        if self.save_thread is not None:
+            self.save_thread.deleteLater()
+            self.save_thread = None
+
+    def save_results(self) -> None:
+        if not self.batch_result:
+            QMessageBox.information(self, self.tr("no_results_title"), self.tr("no_results_body"))
+            return
+        if self.save_thread is not None:
+            QMessageBox.information(self, self.tr("save_in_progress_title"), self.tr("save_in_progress_body"))
+            return
+
+        output_path = self._get_save_output_path()
+        if output_path is None:
+            return
+        self.default_output_path = str(output_path)
+        self.save_thread = QThread(self)
+        self.save_worker = SaveWorker(output_path, self.batch_result)
+        self.save_worker.moveToThread(self.save_thread)
+        self.save_thread.started.connect(self.save_worker.run)
+        self.save_worker.finished.connect(self._on_save_finished)
+        self.save_worker.failed.connect(self._on_save_failed)
+        self.save_worker.finished.connect(self.save_thread.quit)
+        self.save_worker.failed.connect(self.save_thread.quit)
+        self.save_thread.finished.connect(self._cleanup_save_worker)
+        self._set_saving_state()
+        self.save_thread.start()
 
     def _refresh_result_selector(self, selected_index: Optional[int] = None) -> None:
         self.result_selector.blockSignals(True)
@@ -1935,18 +2047,27 @@ class DiscoveryWindow(QMainWindow):
             summary_text = build_batch_summary_text(
                 self.batch_result,
                 result,
-                Path(self.current_output_path or self.output_input.text().strip() or "discovery-result.json"),
+                self._summary_output_path(),
                 language=self.ui_language,
             )
         else:
             summary_text = build_summary_text(
                 result,
-                Path(self.current_output_path or self.output_input.text().strip() or "discovery-result.json"),
+                self._summary_output_path(),
                 language=self.ui_language,
             )
         self.summary_text.setPlainText(summary_text)
         self._rebuild_tables(result)
         self.result_stack.setCurrentIndex(2)
+
+    def _summary_output_path(self) -> Path | str:
+        if self.current_output_path:
+            return self.current_output_path
+        if self.last_save_failed:
+            return self.tr("output_save_failed")
+        if self.batch_result:
+            return self.tr("output_not_saved")
+        return "-"
 
     def _set_summary_card(self, label: QLabel, value: object) -> None:
         label.setText(str(_safe_int(value, 0)))

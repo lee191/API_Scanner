@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from route_api_discovery import (
+    CANCEL_MESSAGE,
     Config,
     ScanCancelled,
     build_batch_summary_text,
@@ -546,7 +547,7 @@ class ScanWorker(QObject):
             execution.cancel_event = self.cancel_event
             result = discover_many(self.request.config, self.request.urls, progress=self._emit_progress, execution=execution)
             if self.cancel_event.is_set():
-                raise ScanCancelled("사용자 요청으로 스캔을 중지했습니다.")
+                raise ScanCancelled(CANCEL_MESSAGE)
         except ScanCancelled as exc:
             self.cancelled.emit(str(exc))
             return

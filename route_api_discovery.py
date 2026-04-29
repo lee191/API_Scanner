@@ -33,7 +33,7 @@ DEFAULT_REQUEST_HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept": "*/*",
 }
-SUPPORTED_OUTPUT_SUFFIXES = {"", ".json", ".xlsx"}
+SUPPORTED_OUTPUT_SUFFIXES = {"", ".json", ".xlsx", ".html"}
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 HOSTNAME_LABEL_RE = re.compile(r"^[A-Za-z0-9-]+$")
@@ -343,7 +343,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max-js-files", type=int, default=50, help="가져올 JS 파일의 최대 개수(기본값: 50)")
     parser.add_argument("--max-depth", type=int, default=2, help="재귀 JS 탐색의 최대 깊이(기본값: 2)")
     parser.add_argument("--timeout", type=float, default=15.0, help="HTTP 타임아웃(초, 기본값: 15)")
-    parser.add_argument("--output", type=Path, default=Path("discovery-result.json"), help="결과 파일 경로(.json/.xlsx 또는 확장자 없음, 기본값: discovery-result.json)")
+    parser.add_argument("--output", type=Path, default=Path("discovery-result.json"), help="결과 파일 경로(.json/.xlsx/.html 또는 확장자 없음, 기본값: discovery-result.json)")
     parser.add_argument("--skip-probe", action="store_true", help="추출된 경로의 접근성 확인을 건너뜁니다.")
     parser.add_argument("--recursive-scan", action="store_true", help="접근 가능한 페이지(200)를 대상으로 재귀 탐색을 수행합니다.")
     parser.add_argument("--recursive-depth", type=int, default=1, help="재귀 탐색 단계(기본값: 1)")
@@ -415,7 +415,7 @@ def validate_config(config: Config) -> None:
 def validate_output_path(output: Path) -> None:
     suffix = output.suffix.lower()
     if suffix not in SUPPORTED_OUTPUT_SUFFIXES:
-        raise ValueError("지원하지 않는 출력 형식입니다. `.json`, `.xlsx`, 또는 확장자 없이 입력해 주세요.")
+        raise ValueError("지원하지 않는 출력 형식입니다. `.json`, `.xlsx`, `.html`, 또는 확장자 없이 입력해 주세요.")
 
 
 def validate_js_output_dir(output_dir: Optional[Path]) -> None:
@@ -2257,6 +2257,8 @@ def discover_many(config: Config, urls: List[str], progress: ProgressCallback = 
             )
             records.append(decorate_scan_result(result, index, total, status="success"))
             emit_progress(progress, f"URL {index}/{total} 스캔 완료: {url}")
+        except ScanCancelled:
+            raise
         except Exception as exc:
             failed = build_empty_scan_result(per_url_config, url, error=str(exc), status="error")
             failed["scan_index"] = index
@@ -2292,7 +2294,9 @@ def save_result(output: Path, data: dict) -> Path:
         return write_json(output, data)
     if suffix == ".xlsx":
         return write_xlsx(output, data)
-    raise ValueError("지원하지 않는 출력 형식입니다. `.json`, `.xlsx`, 또는 확장자 없이 입력해 주세요.")
+    if suffix == ".html":
+        return write_html(output, data)
+    raise ValueError("지원하지 않는 출력 형식입니다. `.json`, `.xlsx`, `.html`, 또는 확장자 없이 입력해 주세요.")
 
 
 def write_xlsx(output: Path, data: dict) -> Path:

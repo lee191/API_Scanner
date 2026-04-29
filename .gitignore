@@ -1,12 +1,15 @@
-# Ignore everything by default.
+# Ignore everything by default, then explicitly allow source and docs.
 *
 
-# Keep repository metadata for GitHub.
+# Repository metadata and documentation.
 !/.gitignore
 !/README.md
 !/LICENSE
+!/.github/
+!/.github/workflows/
+!/.github/workflows/*.yml
 
-# Keep only the files required to run the app.
+# Application source.
 !/pyproject.toml
 !/app.py
 !/route_api_discovery.py
@@ -14,3 +17,16 @@
 !/GUI/
 !/GUI/__init__.py
 !/GUI/launcher.py
+
+# Unit tests.
+!/tests/
+!/tests/*.py
+
+# Generated files, local environments, and sample scan outputs stay ignored.
+__pycache__/
+**/__pycache__/
+*.py[cod]
+/.venv/
+/mag/
+/discovery-result.*
+/mycsat.*

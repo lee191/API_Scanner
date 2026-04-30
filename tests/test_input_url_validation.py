@@ -63,10 +63,10 @@ class InputUrlValidationTests(unittest.TestCase):
             api_bucket,
         )
 
-        self.assertIn("/dashboard", page_bucket)
-        self.assertEqual(page_bucket["/dashboard"].url, "http://127.0.0.1:3000/dashboard")
-        self.assertIn("/api/users", api_bucket)
-        self.assertEqual(api_bucket["/api/users"].url, "http://127.0.0.1:3000/api/users")
+        self.assertIn("http://127.0.0.1:3000/dashboard", page_bucket)
+        self.assertEqual(page_bucket["http://127.0.0.1:3000/dashboard"].url, "http://127.0.0.1:3000/dashboard")
+        self.assertIn("http://127.0.0.1:3000/api/users", api_bucket)
+        self.assertEqual(api_bucket["http://127.0.0.1:3000/api/users"].url, "http://127.0.0.1:3000/api/users")
 
     def test_collect_path_candidates_rejects_other_private_hosts_outside_scope(self) -> None:
         scope = build_url_scope("http://127.0.0.1:3000")

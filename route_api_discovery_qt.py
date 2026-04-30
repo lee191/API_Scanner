@@ -202,6 +202,11 @@ UI_TEXTS = {
         "save_in_progress_title": "저장 중",
         "save_in_progress_body": "결과를 저장하고 있습니다. 완료된 뒤 다시 시도해 주세요.",
         "saving_hint": "결과를 저장하고 있습니다. 잠시만 기다려 주세요.",
+        "run_tooltip": "입력한 URL로 스캔을 시작합니다.",
+        "stop_tooltip": "현재 진행 중인 스캔 중지를 요청합니다.",
+        "save_results_tooltip": "현재 결과를 Excel과 HTML 파일로 저장합니다.",
+        "filter_tooltip": "테이블에서 표시할 행을 좁힙니다.",
+        "table_tooltip": "셀을 더블클릭하면 전체 내용을 복사하고 자세히 볼 수 있습니다.",
     },
     "en": {
         "window_title": "Route API Discovery - Precision Workbench",
@@ -348,6 +353,11 @@ UI_TEXTS = {
         "save_in_progress_title": "Saving",
         "save_in_progress_body": "Results are currently being saved. Try again after it finishes.",
         "saving_hint": "The results are being saved. Please wait a moment.",
+        "run_tooltip": "Start scanning the entered URL list.",
+        "stop_tooltip": "Request cancellation for the active scan.",
+        "save_results_tooltip": "Save the current results as Excel and HTML files.",
+        "filter_tooltip": "Narrow the rows shown in this table.",
+        "table_tooltip": "Double-click a cell to copy and inspect its full value.",
     },
 }
 
@@ -426,6 +436,15 @@ class NoScrollDoubleSpinBox(QDoubleSpinBox):
         event.ignore()
 
 
+class SortableTableWidgetItem(QTableWidgetItem):
+    def __lt__(self, other) -> bool:
+        left = self.data(Qt.ItemDataRole.UserRole)
+        right = other.data(Qt.ItemDataRole.UserRole)
+        if left is not None and right is not None:
+            return left < right
+        return super().__lt__(other)
+
+
 def _safe_int(value: object, default: int = 0) -> int:
     try:
         return int(value)
@@ -438,6 +457,18 @@ def _safe_float(value: object, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _table_sort_value(value: object) -> Optional[float]:
+    text = str(value or "").strip()
+    if not text or text == "-":
+        return None
+    if text.endswith("%"):
+        text = text[:-1].strip()
+    try:
+        return float(text.replace(",", ""))
+    except ValueError:
+        return None
 
 
 def _normalize_sensitive_type(value: object) -> str:
@@ -634,6 +665,7 @@ class DiscoveryWindow(QMainWindow):
         self.save_worker: Optional[SaveWorker] = None
         self.state_mode = "idle"
         self.last_error_message = ""
+        self.last_save_error_message = ""
         self.last_save_failed = False
         self.current_target_value = "-"
         self.current_output_value = "-"
@@ -789,6 +821,7 @@ class DiscoveryWindow(QMainWindow):
         headers = self._localized_headers(bundle.header_keys)
         current_index = bundle.filter_col.currentIndex()
         bundle.filter_label.setText(self.tr("filter"))
+        bundle.filter_label.setToolTip(self.tr("filter_tooltip"))
         bundle.filter_col.blockSignals(True)
         bundle.filter_col.clear()
         bundle.filter_col.addItem(self.tr("all"))
@@ -797,10 +830,15 @@ class DiscoveryWindow(QMainWindow):
         bundle.filter_col.setCurrentIndex(max(0, min(current_index, bundle.filter_col.count() - 1)))
         bundle.filter_col.blockSignals(False)
         bundle.filter_text.setPlaceholderText(self.tr("search_placeholder"))
+        bundle.filter_col.setToolTip(self.tr("filter_tooltip"))
+        bundle.filter_text.setToolTip(self.tr("filter_tooltip"))
         bundle.quick_check.setText(self.tr(bundle.quick_filter_key))
+        bundle.quick_check.setToolTip(self.tr("filter_tooltip"))
         bundle.clear_button.setText(self.tr("reset"))
+        bundle.clear_button.setToolTip(self.tr("filter_tooltip"))
         bundle.count_label.setText(self.tr("count_label", visible=0, total=0))
         bundle.table.setHorizontalHeaderLabels(headers)
+        bundle.table.setToolTip(self.tr("table_tooltip"))
 
     def _localize_sensitive_type_filter(self) -> None:
         if not hasattr(self, "sensitive_type_combo"):
@@ -821,7 +859,9 @@ class DiscoveryWindow(QMainWindow):
 
         self.url_title_label.setText(self.tr("target_url"))
         self.run_button.setText(self.tr("run"))
+        self.run_button.setToolTip(self.tr("run_tooltip"))
         self.stop_button.setText(self.tr("stop"))
+        self.stop_button.setToolTip(self.tr("stop_tooltip"))
         self.url_input.setPlaceholderText(self.tr("url_placeholder"))
 
         self.header_title_label.setText(self.tr("request_headers"))
@@ -849,6 +889,7 @@ class DiscoveryWindow(QMainWindow):
 
         self.action_title_label.setText(self.tr("execution_status"))
         self.save_again_button.setText(self.tr("save_results"))
+        self.save_again_button.setToolTip(self.tr("save_results_tooltip"))
 
         self.result_selector_label.setText(self.tr("result_selector"))
         self.dark_mode_check.setText(self.tr("dark_mode"))
@@ -913,7 +954,10 @@ class DiscoveryWindow(QMainWindow):
             if self.last_save_failed and self.batch_result:
                 result_count = len(self.batch_result.get("results", []))
                 success_count = _safe_int(self.batch_result.get("success_count", 0), 0)
-                self._set_error_state(self.tr("save_failed_state", message=self.last_error_message))
+                save_error = self.last_save_error_message or self.last_error_message
+                self._set_error_state(self.tr("save_failed_state", message=save_error))
+                self.last_save_error_message = save_error
+                self.last_save_failed = True
                 self.left_state_hint.setText(
                     self.tr(
                         "save_failed_hint",
@@ -929,6 +973,28 @@ class DiscoveryWindow(QMainWindow):
 
         if self.batch_result and self.batch_result.get("results"):
             self._refresh_result_selector(selected_index=selected_index)
+
+    def _set_scan_inputs_enabled(self, enabled: bool) -> None:
+        controls = (
+            self.url_input,
+            self.header_input,
+            self.max_js_spin,
+            self.max_depth_spin,
+            self.timeout_spin,
+            self.recursive_scan_check,
+            self.include_subdomains_check,
+            self.excluded_subdomains_input,
+            self.skip_probe_check,
+            self.verify_ssl_check,
+            self.max_workers_spin,
+            self.request_delay_spin,
+            self.proxy_input,
+            self.js_output_dir_input,
+            self.js_output_dir_button,
+        )
+        for control in controls:
+            control.setEnabled(enabled)
+        self.recursive_depth_spin.setEnabled(enabled and self.recursive_scan_check.isChecked())
 
     def _init_left_cards(
         self,
@@ -1664,11 +1730,13 @@ class DiscoveryWindow(QMainWindow):
     def _set_idle_state(self) -> None:
         self.state_mode = "idle"
         self.last_error_message = ""
+        self.last_save_error_message = ""
         self.last_save_failed = False
         self._update_state_chip(state="idle", text=self.tr("state_idle"))
         self.secondary_chip.setText(self.tr("secondary_no_results"))
         self.left_state_hint.setText(self.tr("idle_hint"))
         self.result_stack.setCurrentIndex(0)
+        self._set_scan_inputs_enabled(True)
         self.result_selector.setEnabled(False)
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
@@ -1677,12 +1745,14 @@ class DiscoveryWindow(QMainWindow):
     def _set_running_state(self) -> None:
         self.state_mode = "running"
         self.last_error_message = ""
+        self.last_save_error_message = ""
         self.last_save_failed = False
         self._update_state_chip(state="running", text=self.tr("state_running"))
         self.secondary_chip.setText(self.tr("secondary_scanning"))
         self.left_state_hint.setText(self.tr("running_hint"))
         self.result_stack.setCurrentIndex(2)
         self.tab_widget.setCurrentWidget(self.log_text)
+        self._set_scan_inputs_enabled(False)
         self.result_selector.setEnabled(False)
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
@@ -1695,6 +1765,7 @@ class DiscoveryWindow(QMainWindow):
         self.left_state_hint.setText(self.tr("cancelling_hint"))
         self.result_stack.setCurrentIndex(2)
         self.tab_widget.setCurrentWidget(self.log_text)
+        self._set_scan_inputs_enabled(False)
         self.result_selector.setEnabled(False)
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(False)
@@ -1703,11 +1774,13 @@ class DiscoveryWindow(QMainWindow):
     def _set_saving_state(self) -> None:
         self.state_mode = "saving"
         self.last_error_message = ""
+        self.last_save_error_message = ""
         self.last_save_failed = False
         self._update_state_chip(state="saving", text=self.tr("state_saving"))
         self.secondary_chip.setText(self.tr("secondary_saving"))
         self.left_state_hint.setText(self.tr("saving_hint"))
         self.result_stack.setCurrentIndex(2)
+        self._set_scan_inputs_enabled(False)
         self.result_selector.setEnabled(bool(self.batch_result and self.batch_result.get("results")))
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(False)
@@ -1716,11 +1789,13 @@ class DiscoveryWindow(QMainWindow):
     def _set_result_ready_state(self, message: str) -> None:
         self.state_mode = "ready"
         self.last_error_message = ""
+        self.last_save_error_message = ""
         self.last_save_failed = False
         self._update_state_chip(state="ready", text=self.tr("state_ready"))
         self.secondary_chip.setText(self.tr("secondary_ready"))
         self.left_state_hint.setText(message)
         self.result_stack.setCurrentIndex(2)
+        self._set_scan_inputs_enabled(True)
         self.result_selector.setEnabled(True)
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
@@ -1732,6 +1807,7 @@ class DiscoveryWindow(QMainWindow):
         self._update_state_chip(state="error", text=self.tr("state_error"))
         self.secondary_chip.setText(self.tr("secondary_failed"))
         self.left_state_hint.setText(message)
+        self._set_scan_inputs_enabled(True)
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.save_again_button.setEnabled(self.batch_result is not None)
@@ -1871,9 +1947,13 @@ class DiscoveryWindow(QMainWindow):
         self.worker.finished.connect(self._on_finished)
         self.worker.cancelled.connect(self._on_cancelled)
         self.worker.failed.connect(self._on_failed)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.worker.cancelled.connect(self.worker.deleteLater)
+        self.worker.failed.connect(self.worker.deleteLater)
         self.worker.finished.connect(self.worker_thread.quit)
         self.worker.cancelled.connect(self.worker_thread.quit)
         self.worker.failed.connect(self.worker_thread.quit)
+        self.worker_thread.finished.connect(self.worker_thread.deleteLater)
         self.worker_thread.finished.connect(self._cleanup_worker)
 
         if not request.config.verify_ssl:
@@ -1899,6 +1979,7 @@ class DiscoveryWindow(QMainWindow):
         self.current_output_path = ""
         self.current_output_save_failed = False
         self.last_save_failed = False
+        self.last_save_error_message = ""
         self._set_current_output("")
         self._refresh_result_selector()
         self._set_result_ready_state(self._build_ready_message(batch_result))
@@ -1918,6 +1999,7 @@ class DiscoveryWindow(QMainWindow):
             self.default_output_path = str(Path(saved_paths[0]).with_suffix(""))
         self.current_output_save_failed = False
         self.last_save_failed = False
+        self.last_save_error_message = ""
         self.log_text.appendPlainText(self.tr("log_save_completed", path=output_label))
         self._set_current_output(output_label)
         self._refresh_result_selector(selected_index=selected_index)
@@ -1928,6 +2010,7 @@ class DiscoveryWindow(QMainWindow):
         selected_index = self.result_selector.currentIndex()
         self.current_output_path = ""
         self.last_save_failed = True
+        self.last_save_error_message = message
         self.log_text.appendPlainText(self.tr("log_save_error", message=message))
         self._set_current_output("", save_failed=True)
         self._refresh_result_selector(selected_index=selected_index)
@@ -1950,25 +2033,18 @@ class DiscoveryWindow(QMainWindow):
         self.batch_result = None
         self.current_output_path = ""
         self.last_save_failed = False
+        self.last_save_error_message = ""
         self._reset_result_views()
         self._set_idle_state()
         self.left_state_hint.setText(message)
 
     def _cleanup_worker(self) -> None:
-        if self.worker is not None:
-            self.worker.deleteLater()
-            self.worker = None
-        if self.worker_thread is not None:
-            self.worker_thread.deleteLater()
-            self.worker_thread = None
+        self.worker = None
+        self.worker_thread = None
 
     def _cleanup_save_worker(self) -> None:
-        if self.save_worker is not None:
-            self.save_worker.deleteLater()
-            self.save_worker = None
-        if self.save_thread is not None:
-            self.save_thread.deleteLater()
-            self.save_thread = None
+        self.save_worker = None
+        self.save_thread = None
 
     def save_results(self) -> None:
         if not self.batch_result:
@@ -1988,8 +2064,11 @@ class DiscoveryWindow(QMainWindow):
         self.save_thread.started.connect(self.save_worker.run)
         self.save_worker.finished.connect(self._on_save_finished)
         self.save_worker.failed.connect(self._on_save_failed)
+        self.save_worker.finished.connect(self.save_worker.deleteLater)
+        self.save_worker.failed.connect(self.save_worker.deleteLater)
         self.save_worker.finished.connect(self.save_thread.quit)
         self.save_worker.failed.connect(self.save_thread.quit)
+        self.save_thread.finished.connect(self.save_thread.deleteLater)
         self.save_thread.finished.connect(self._cleanup_save_worker)
         self._set_saving_state()
         self.save_thread.start()
@@ -2210,14 +2289,14 @@ class DiscoveryWindow(QMainWindow):
         return f"{score:.2f}"
 
     def _extract_sensitive_display_value(self, item: dict) -> str:
-        raw = item.get("value", item.get("raw_value"))
-        if raw is not None and str(raw).strip():
-            return str(raw).strip()
         masked = item.get("masked_value")
         if masked is None:
             masked = item.get("maskedValue")
         if masked is not None and str(masked).strip():
             return str(masked).strip()
+        raw = item.get("value", item.get("raw_value"))
+        if raw is not None and str(raw).strip():
+            return str(raw).strip()
         return "-"
 
     def _extract_sensitive_records(self, result: dict) -> List[dict]:
@@ -2381,14 +2460,21 @@ class DiscoveryWindow(QMainWindow):
 
     def _populate_table(self, table: QTableWidget, rows: List[Tuple[str, ...]]) -> None:
         table.setSortingEnabled(False)
-        table.setRowCount(len(rows))
-        for row_index, row in enumerate(rows):
-            for col_index, value in enumerate(row):
-                item = QTableWidgetItem(value)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-                table.setItem(row_index, col_index, item)
-            table.setRowHeight(row_index, 28)
-        table.setSortingEnabled(True)
+        try:
+            table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                for col_index, value in enumerate(row):
+                    text = str(value)
+                    item = SortableTableWidgetItem(text)
+                    sort_value = _table_sort_value(text)
+                    if sort_value is not None:
+                        item.setData(Qt.ItemDataRole.UserRole, sort_value)
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+                    item.setToolTip(text)
+                    table.setItem(row_index, col_index, item)
+                table.setRowHeight(row_index, 28)
+        finally:
+            table.setSortingEnabled(True)
 
     def _on_table_double_click(self, table: QTableWidget, row: int, col: int) -> None:
         item = table.item(row, col)

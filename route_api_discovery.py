@@ -67,6 +67,21 @@ ASSET_EXTENSIONS = {
 }
 STATIC_PREFIXES = ("/_next/", "/static/", "/assets/", "/public/", "/images/", "/img/", "/fonts/")
 JS_HINT_PREFIXES = ("/_next/", "/static/", "/assets/")
+API_PATH_PREFIXES = (
+    "/api",
+    "/apis",
+    "/graphql",
+    "/rest",
+    "/auth",
+    "/oauth",
+    "/ajax",
+    "/svc",
+    "/service",
+    "/services",
+    "/rpc",
+)
+API_PATH_SEGMENTS = ("/api/", "/apis/", "/graphql", "/rest/", "/auth/", "/oauth/", "/ajax/", "/svc/", "/service/", "/services/", "/rpc/")
+API_PATH_SUFFIXES = (".do", ".action", ".json", ".svc")
 COMMON_COUNTRY_CODE_SECOND_LEVEL_LABELS = {
     "ac",
     "co",
@@ -84,6 +99,7 @@ COMMON_COUNTRY_CODE_SECOND_LEVEL_LABELS = {
 }
 URL_SCHEME_ONLY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+\-.]*:(?:/*)?$")
 INVALID_URL_CHARS_RE = re.compile(r"[\x00-\x20<>{}|\\]")
+DYNAMIC_URL_PLACEHOLDER_RE = re.compile(r"\$\{[^}]*\}")
 QUOTED_PATH_RE = re.compile(
     r"""(?P<quote>["'`])(?P<value>(?:https?://[^"'`]+|/[^"'`]+|[A-Za-z0-9._~\-]+/[^"'`]+|api/[^"'`]+))(?P=quote)""",
     re.IGNORECASE,
@@ -101,6 +117,7 @@ API_PATTERN_RE_LIST = (
     re.compile(r"""baseURL\s*:\s*(?P<quote>["'`])(?P<value>[^"'`]+)(?P=quote)""", re.IGNORECASE),
     re.compile(r"""(?P<quote>["'`])(?P<value>/(?:api|graphql|rest)/[^"'`]*) (?P=quote)""".replace(" ", ""), re.IGNORECASE),
 )
+AXIOS_OBJECT_RE = re.compile(r"""axios\(\s*\{(?P<body>.*?)\}\s*\)""", re.IGNORECASE | re.DOTALL)
 SCRIPT_BLOCK_RE = re.compile(r"<script\b(?P<attrs>[^>]*)>(?P<body>.*?)</script\s*>", re.IGNORECASE | re.DOTALL)
 SCRIPT_SRC_RE = re.compile(r"""\bsrc\s*=\s*(?P<quote>["']?)(?P<value>[^"' >]+)(?P=quote)""", re.IGNORECASE)
 HARD_CODED_EMAIL_RE = re.compile(
@@ -111,8 +128,30 @@ HARD_CODED_PHONE_RE = re.compile(
     r"(?:[-.\s]?\d{3,4})[-.\s]?\d{4}|(?:\+|00)\d{1,3}(?:[-.\s]?\(?\d{1,4}\)?){2,5})(?!\w)"
 )
 HARD_CODED_KEY_VALUE_RE = re.compile(
-    r"""(?:(?P<kq>["'`])?(?P<key>[A-Za-z_][A-Za-z0-9_]*)(?P=kq)?)\s*[:=]\s*(?P<vq>["'`])(?P<value>[^"'`\r\n]{0,256}?)(?P=vq)""",
+    r"""(?:(?P<kq>["'`])(?P<quoted_key>[A-Za-z_][A-Za-z0-9_.-]*)(?P=kq)|(?P<bare_key>[A-Za-z_][A-Za-z0-9_]*))\s*[:=]\s*(?P<vq>["'`])(?P<value>[^"'`\r\n]{0,512}?)(?P=vq)""",
     re.IGNORECASE,
+)
+HARD_CODED_SECRET_VALUE_PATTERNS = (
+    (
+        "jwt",
+        re.compile(r"(?<![A-Za-z0-9_-])(?P<value>eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,})(?![A-Za-z0-9_-])"),
+    ),
+    (
+        "aws_access_key",
+        re.compile(r"(?<![A-Z0-9])(?P<value>(?:AKIA|ASIA)[A-Z0-9]{16})(?![A-Z0-9])"),
+    ),
+    (
+        "github_token",
+        re.compile(r"(?<![A-Za-z0-9_])(?P<value>gh[pousr]_[A-Za-z0-9_]{20,255})(?![A-Za-z0-9_])"),
+    ),
+    (
+        "google_api_key",
+        re.compile(r"(?<![A-Za-z0-9_-])(?P<value>AIza[A-Za-z0-9_-]{35})(?![A-Za-z0-9_-])"),
+    ),
+    (
+        "slack_token",
+        re.compile(r"(?<![A-Za-z0-9-])(?P<value>xox[baprs]-[A-Za-z0-9-]{10,})(?![A-Za-z0-9-])"),
+    ),
 )
 HARD_CODED_EMAIL_PLACEHOLDER_DOMAINS = {
     "example.com",
@@ -145,12 +184,25 @@ HARD_CODED_PLACEHOLDER_VALUES = {
     "test@test.com",
     "your@email.com",
     "noreply@example.com",
+    "redacted",
+    "hidden",
+    "masked",
+    "<hidden>",
+    "<redacted>",
+    "[hidden]",
+    "[redacted]",
 }
 HARD_CODED_DYNAMIC_VALUE_MARKERS = (
     "${",
     "{{",
+    "<%",
+    "%{",
     "process.env",
     "import.meta.env",
+    "env.",
+    "secrets.",
+    "secretref",
+    "vault:",
     "window.__env",
     "window.__ENV",
     "config.",
@@ -182,12 +234,24 @@ HARD_CODED_TOKEN_KEYS = {
     "token",
     "accesstoken",
     "refreshtoken",
+    "idtoken",
+    "authtoken",
+    "sessiontoken",
+    "csrftoken",
     "apikey",
     "api_key",
     "secret",
     "clientsecret",
+    "clienttoken",
     "authorization",
     "bearer",
+    "jwt",
+    "awsaccesskeyid",
+    "secretaccesskey",
+    "githubtoken",
+    "slacktoken",
+    "googleapikey",
+    "privatekey",
 }
 HARD_CODED_EMAIL_KEYS = {"email", "loginemail", "contactemail"}
 HARD_CODED_PHONE_KEYS = {"phone", "mobile", "tel", "telephone", "contactphone"}
@@ -797,11 +861,26 @@ def resolve_absolute_url(base_url: str, candidate: str, *, allow_disallowed_host
     return absolute
 
 
+def normalize_dynamic_url_candidate(candidate: str) -> str:
+    value = str(candidate or "").strip()
+    if not value:
+        return ""
+    return DYNAMIC_URL_PLACEHOLDER_RE.sub(":param", value)
+
+
 def normalize_path(value: str) -> str:
     parsed = urlparse(value)
     path = parsed.path or "/"
     if parsed.query:
         return f"{path}?{parsed.query}"
+    return path
+
+
+def candidate_identity(value: str) -> str:
+    parsed = urlparse(value)
+    path = normalize_path(value)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}{path}"
     return path
 
 
@@ -1004,11 +1083,12 @@ def classify_candidate(raw_value: str, absolute_url: str) -> str:
     path = normalize_path(absolute_url)
     raw_lowered = raw_value.lower()
     path_lowered = path.lower()
+    version_prefixes = tuple(f"v{index}/" for index in range(1, 10))
     if (
-        path_lowered.startswith("/api")
-        or "/graphql" in path_lowered
-        or "/rest" in path_lowered
-        or raw_lowered.startswith(("api/", "v1/", "v2/", "v3/"))
+        path_lowered.startswith(API_PATH_PREFIXES)
+        or any(segment in path_lowered for segment in API_PATH_SEGMENTS)
+        or path_lowered.endswith(API_PATH_SUFFIXES)
+        or raw_lowered.startswith(("api/", "apis/", *version_prefixes))
     ):
         return "api"
     return "page"
@@ -1016,11 +1096,74 @@ def classify_candidate(raw_value: str, absolute_url: str) -> str:
 
 def add_candidate(bucket: Dict[str, Candidate], absolute_url: str, source: str, kind: str) -> None:
     path = normalize_path(absolute_url)
-    candidate = bucket.get(path)
+    key = candidate_identity(absolute_url)
+    candidate = bucket.get(key)
     if candidate is None:
         candidate = Candidate(url=absolute_url, path=path, kind=kind)
-        bucket[path] = candidate
+        bucket[key] = candidate
     candidate.sources.add(source)
+
+
+def discard_candidate(bucket: Dict[str, Candidate], absolute_url: str) -> None:
+    bucket.pop(candidate_identity(absolute_url), None)
+
+
+def add_api_candidate(
+    api_bucket: Dict[str, Candidate],
+    page_bucket: Dict[str, Candidate],
+    absolute_url: str,
+    source: str,
+) -> None:
+    discard_candidate(page_bucket, absolute_url)
+    add_candidate(api_bucket, absolute_url, source, "api")
+
+
+def _resolve_candidate_for_detection(base_url: str, raw_value: str, *, allow_disallowed_host: bool) -> Optional[str]:
+    normalized_value = normalize_dynamic_url_candidate(raw_value)
+    return resolve_absolute_url(base_url, normalized_value, allow_disallowed_host=allow_disallowed_host)
+
+
+def _extract_named_url_value(text: str, name: str) -> Optional[str]:
+    pattern = re.compile(rf"""\b{name}\s*:\s*(?P<quote>["'`])(?P<value>[^"'`]+)(?P=quote)""", re.IGNORECASE)
+    match = pattern.search(text)
+    if match:
+        return match.group("value").strip()
+    return None
+
+
+def extract_axios_combined_urls(text: str, base_url: str, *, allow_disallowed_host: bool) -> List[str]:
+    urls: List[str] = []
+    for match in AXIOS_OBJECT_RE.finditer(text):
+        body = match.group("body") or ""
+        base_value = _extract_named_url_value(body, "baseURL")
+        path_value = _extract_named_url_value(body, "url")
+        if not base_value or not path_value:
+            continue
+        base_candidate = normalize_dynamic_url_candidate(base_value)
+        path_candidate = normalize_dynamic_url_candidate(path_value)
+        if not base_candidate or not path_candidate:
+            continue
+        joined_candidate = f"{base_candidate.rstrip('/')}/{path_candidate.lstrip('/')}"
+        absolute = resolve_absolute_url(base_url, joined_candidate, allow_disallowed_host=allow_disallowed_host)
+        if absolute:
+            urls.append(absolute)
+    return urls
+
+
+def extract_axios_component_urls(text: str, base_url: str, *, allow_disallowed_host: bool) -> List[str]:
+    urls: List[str] = []
+    for match in AXIOS_OBJECT_RE.finditer(text):
+        body = match.group("body") or ""
+        if not _extract_named_url_value(body, "baseURL") or not _extract_named_url_value(body, "url"):
+            continue
+        for name in ("baseURL", "url"):
+            raw_value = _extract_named_url_value(body, name)
+            if not raw_value:
+                continue
+            absolute = _resolve_candidate_for_detection(base_url, raw_value, allow_disallowed_host=allow_disallowed_host)
+            if absolute:
+                urls.append(absolute)
+    return urls
 
 
 def collect_path_candidates(
@@ -1034,7 +1177,7 @@ def collect_path_candidates(
     allow_disallowed_host = should_allow_disallowed_host(base_url)
     for match in QUOTED_PATH_RE.finditer(text):
         raw_value = match.group("value").strip()
-        absolute = resolve_absolute_url(base_url, raw_value, allow_disallowed_host=allow_disallowed_host)
+        absolute = _resolve_candidate_for_detection(base_url, raw_value, allow_disallowed_host=allow_disallowed_host)
         if not absolute:
             continue
         if not url_matches_scope(absolute, scope):
@@ -1044,14 +1187,22 @@ def collect_path_candidates(
             continue
         kind = classify_candidate(raw_value, absolute)
         if kind == "api":
-            add_candidate(api_bucket, absolute, source_label, "api")
+            add_api_candidate(api_bucket, page_bucket, absolute, source_label)
         else:
             add_candidate(page_bucket, absolute, source_label, "page")
+
+    for absolute in extract_axios_combined_urls(text, base_url, allow_disallowed_host=allow_disallowed_host):
+        if not url_matches_scope(absolute, scope):
+            continue
+        path = normalize_path(absolute)
+        if is_static_asset(path):
+            continue
+        add_api_candidate(api_bucket, page_bucket, absolute, source_label)
 
     for pattern in API_PATTERN_RE_LIST:
         for match in pattern.finditer(text):
             raw_value = match.group("value").strip()
-            absolute = resolve_absolute_url(base_url, raw_value, allow_disallowed_host=allow_disallowed_host)
+            absolute = _resolve_candidate_for_detection(base_url, raw_value, allow_disallowed_host=allow_disallowed_host)
             if not absolute:
                 continue
             if not url_matches_scope(absolute, scope):
@@ -1059,7 +1210,12 @@ def collect_path_candidates(
             path = normalize_path(absolute)
             if is_static_asset(path):
                 continue
-            add_candidate(api_bucket, absolute, source_label, "api")
+            if path.rstrip("/") in {"/api", "/apis"}:
+                continue
+            add_api_candidate(api_bucket, page_bucket, absolute, source_label)
+
+    for absolute in extract_axios_component_urls(text, base_url, allow_disallowed_host=allow_disallowed_host):
+        discard_candidate(api_bucket, absolute)
 
 
 def extract_html_assets(html: str, page_url: str, scope: UrlScope) -> Tuple[List[str], List[str]]:
@@ -1083,7 +1239,7 @@ def extract_additional_js_urls(script_text: str, source_url: str, scope: UrlScop
     for pattern in JS_IMPORT_RE_LIST:
         for match in pattern.finditer(script_text):
             raw_value = match.group("value").strip()
-            absolute = resolve_absolute_url(source_url, raw_value, allow_disallowed_host=allow_disallowed_host)
+            absolute = _resolve_candidate_for_detection(source_url, raw_value, allow_disallowed_host=allow_disallowed_host)
             if absolute and url_matches_scope(absolute, scope) and should_follow_js(absolute):
                 discovered.append(absolute)
     return discovered
@@ -1114,13 +1270,17 @@ def _looks_like_dynamic_reference(value: str) -> bool:
     lowered = str(value or "").strip().lower()
     if not lowered:
         return False
-    return lowered.startswith("$") or any(marker in lowered for marker in HARD_CODED_DYNAMIC_VALUE_MARKERS)
+    if lowered.startswith("$") or any(marker in lowered for marker in HARD_CODED_DYNAMIC_VALUE_MARKERS):
+        return True
+    return bool(re.fullmatch(r"%[A-Za-z0-9_.-]+%|__[A-Za-z0-9_.-]+__", str(value or "").strip()))
 
 
 def _normalize_hardcoded_value(category: str, value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
+    if category in HARD_CODED_SECRET_CATEGORIES:
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
     if category == "email":
         return raw.lower()
     if category == "phone":
@@ -1135,6 +1295,8 @@ def _is_placeholder_hardcoded_value(category: str, value: str, normalized_value:
     normalized = str(normalized_value or "").strip().lower()
     if lowered in HARD_CODED_PLACEHOLDER_VALUES or normalized in HARD_CODED_PLACEHOLDER_VALUES:
         return True
+    if re.fullmatch(r"[*xX._\-•]{4,}", str(value or "").strip()):
+        return True
     if category == "email" and "@" in lowered:
         domain = lowered.split("@", 1)[1]
         if domain in HARD_CODED_EMAIL_PLACEHOLDER_DOMAINS:
@@ -1148,6 +1310,35 @@ def _is_placeholder_hardcoded_value(category: str, value: str, normalized_value:
     if "dummy" in lowered or "sample" in lowered or "fixture" in lowered or "mock" in lowered:
         return True
     return False
+
+
+def _mask_middle(value: str, visible_prefix: int = 4, visible_suffix: int = 4) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if len(raw) <= visible_prefix + visible_suffix:
+        return "*" * len(raw)
+    return f"{raw[:visible_prefix]}...{raw[-visible_suffix:]}"
+
+
+def _mask_hardcoded_value(category: str, value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if category in HARD_CODED_SECRET_CATEGORIES:
+        return _mask_middle(raw)
+    if category == "email" and "@" in raw:
+        local, domain = raw.split("@", 1)
+        if not local:
+            return f"***@{domain}"
+        return f"{local[0]}***@{domain}"
+    if category == "phone":
+        digits = re.sub(r"\D", "", raw)
+        if len(digits) >= 4:
+            return f"***-****-{digits[-4:]}"
+    if category in {"person_name", "account_id", "user_id"}:
+        return _mask_middle(raw, visible_prefix=2, visible_suffix=2)
+    return raw
 
 
 def _is_valid_phone_candidate(value: str) -> bool:
@@ -1281,6 +1472,8 @@ def _append_hardcoded_finding(
         return
 
     is_placeholder = _is_placeholder_hardcoded_value(category, value, normalized_value)
+    if is_placeholder and category in HARD_CODED_SECRET_CATEGORIES:
+        return
     confidence = _score_hardcoded_finding(
         category=category,
         field_name=field_name,
@@ -1289,12 +1482,13 @@ def _append_hardcoded_finding(
         is_placeholder=is_placeholder,
     )
     severity = _severity_for_hardcoded_finding(category, confidence)
+    masked_value = _mask_hardcoded_value(category, value)
     findings.append(
         {
             "category": category,
             "field_name": field_name,
             "value": value,
-            "masked_value": value,
+            "masked_value": masked_value,
             "normalized_value": normalized_value,
             "source_type": source_type,
             "source_url": source_url,
@@ -1322,7 +1516,7 @@ def collect_hardcoded_findings(
         return
 
     for match in HARD_CODED_KEY_VALUE_RE.finditer(text):
-        field_name = (match.group("key") or "").strip()
+        field_name = (match.group("quoted_key") or match.group("bare_key") or "").strip()
         value = (match.group("value") or "").strip()
         if not field_name or not value:
             continue
@@ -1357,6 +1551,30 @@ def collect_hardcoded_findings(
             context=context,
             matched_by="key_context.literal",
         )
+
+    for pattern_name, pattern in HARD_CODED_SECRET_VALUE_PATTERNS:
+        for match in pattern.finditer(text):
+            value = (match.group("value") or "").strip()
+            if not value or _looks_like_dynamic_reference(value):
+                continue
+            start = match.start("value")
+            end = match.end("value")
+            context = _extract_context_snippet(text, start, end)
+            line, column = _line_column_from_offset(text, start)
+            _append_hardcoded_finding(
+                findings=findings,
+                dedupe_keys=dedupe_keys,
+                category="token",
+                field_name=pattern_name,
+                value=value,
+                source_type=source_type,
+                source_url=source_url,
+                source_label=source_label,
+                line=line,
+                column=column,
+                context=context,
+                matched_by=f"regex.secret.{pattern_name}",
+            )
 
     for match in HARD_CODED_EMAIL_RE.finditer(text):
         value = (match.group("value") or "").strip()
@@ -1690,15 +1908,16 @@ def filter_candidate_bucket_by_path(
     filtered: Dict[str, Candidate] = {}
     skipped = 0
     for candidate in sorted(bucket.values(), key=lambda item: (item.path, item.url)):
-        if candidate.path in known_paths:
+        key = candidate_identity(candidate.url)
+        if key in known_paths:
             skipped += 1
             continue
-        existing = filtered.get(candidate.path)
+        existing = filtered.get(key)
         if existing is not None:
             existing.sources.update(candidate.sources)
             skipped += 1
             continue
-        filtered[candidate.path] = candidate
+        filtered[key] = candidate
     return filtered, skipped
 
 
@@ -1760,7 +1979,7 @@ def probe_row_rank(row: dict) -> int:
 
 
 def dedupe_result_rows_by_path(rows: List[dict]) -> Tuple[List[dict], int]:
-    deduped_by_path: Dict[str, dict] = {}
+    deduped_by_key: Dict[str, dict] = {}
     skipped = 0
     for item in sorted(rows, key=lambda row: (str(row.get("path", "")), str(row.get("url", "")))):
         raw_path = str(item.get("path", "") or "")
@@ -1768,21 +1987,22 @@ def dedupe_result_rows_by_path(rows: List[dict]) -> Tuple[List[dict], int]:
         if not raw_path and not raw_url:
             continue
         path = normalize_path(raw_path or raw_url)
+        key = candidate_identity(raw_url or raw_path)
         normalized = dict(item)
         normalized["path"] = path
         normalized["sources"] = sorted(set(normalized.get("sources", []) or []))
-        existing = deduped_by_path.get(path)
+        existing = deduped_by_key.get(key)
         if existing is None:
-            deduped_by_path[path] = normalized
+            deduped_by_key[key] = normalized
             continue
         skipped += 1
         merged_sources = sorted(set(existing.get("sources", []) or []).union(normalized.get("sources", []) or []))
         if probe_row_rank(normalized) > probe_row_rank(existing):
             normalized["sources"] = merged_sources
-            deduped_by_path[path] = normalized
+            deduped_by_key[key] = normalized
             continue
         existing["sources"] = merged_sources
-    deduped_rows = sorted(deduped_by_path.values(), key=lambda row: (str(row.get("path", "")), str(row.get("url", ""))))
+    deduped_rows = sorted(deduped_by_key.values(), key=lambda row: (str(row.get("path", "")), str(row.get("url", ""))))
     return deduped_rows, skipped
 
 
@@ -2104,9 +2324,9 @@ def _discover_once(
     state.skipped_api_duplicates += skipped_row_apis
 
     for item in all_pages:
-        state.known_page_paths.add(item["path"])
+        state.known_page_paths.add(candidate_identity(item.get("url") or item["path"]))
     for item in all_apis:
-        state.known_api_paths.add(item["path"])
+        state.known_api_paths.add(candidate_identity(item.get("url") or item["path"]))
 
     hardcoded_findings, _ = dedupe_hardcoded_findings(hardcoded_findings)
     hardcoded_summary = summarize_hardcoded_findings(hardcoded_findings)
@@ -2167,7 +2387,7 @@ def discover(config: Config, progress: ProgressCallback = None, execution: Optio
         if depth > max_recursive_depth:
             continue
 
-        target_path = normalize_path(target_url)
+        target_path = candidate_identity(target_url)
         if target_path in state.scanned_target_paths:
             state.skipped_target_duplicates += 1
             continue
@@ -2206,7 +2426,7 @@ def discover(config: Config, progress: ProgressCallback = None, execution: Optio
             if not next_url or not url_matches_scope(next_url, recursive_scope):
                 continue
 
-            next_path = normalize_path(next_url)
+            next_path = candidate_identity(next_url)
             if next_path in state.scanned_target_paths or next_path in state.discovered_target_paths:
                 state.skipped_target_duplicates += 1
                 continue
@@ -2532,7 +2752,7 @@ def build_hardcoded_sheet_rows(rows_data: List[dict]) -> List[List[object]]:
                 item.get("confidence", ""),
                 item.get("category", ""),
                 item.get("field_name", ""),
-                item.get("value", item.get("masked_value", "")),
+                item.get("masked_value") or item.get("value", ""),
                 item.get("source_type", ""),
                 item.get("line", ""),
                 item.get("column", ""),

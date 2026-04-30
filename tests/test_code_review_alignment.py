@@ -9,6 +9,7 @@ from route_api_discovery import (
     build_batch_result,
     build_url_scope,
     collect_hardcoded_findings,
+    collect_path_candidates,
     Config,
     FetchResult,
     MAX_RESPONSE_BYTES,
@@ -154,6 +155,78 @@ class CodeReviewAlignmentTests(unittest.TestCase):
 
         self.assertEqual(script_urls, [])
         self.assertEqual(inline_scripts, [])
+
+    def test_collect_path_candidates_normalizes_template_literal_api_paths(self) -> None:
+        scope = build_url_scope("https://example.com")
+        page_bucket: dict = {}
+        api_bucket: dict = {}
+
+        collect_path_candidates(
+            "fetch(`/api/users/${id}?type=${kind}`)",
+            "https://example.com",
+            "js:https://example.com/app.js",
+            scope,
+            page_bucket,
+            api_bucket,
+        )
+
+        self.assertIn("https://example.com/api/users/:param?type=:param", api_bucket)
+        self.assertEqual(api_bucket["https://example.com/api/users/:param?type=:param"].path, "/api/users/:param?type=:param")
+
+    def test_collect_path_candidates_combines_axios_base_url_and_url(self) -> None:
+        scope = build_url_scope("https://example.com")
+        page_bucket: dict = {}
+        api_bucket: dict = {}
+
+        collect_path_candidates(
+            'axios({ method: "get", baseURL: "/api", url: "/users" })',
+            "https://example.com",
+            "js:https://example.com/app.js",
+            scope,
+            page_bucket,
+            api_bucket,
+        )
+
+        self.assertIn("https://example.com/api/users", api_bucket)
+        self.assertNotIn("https://example.com/users", api_bucket)
+
+    def test_collect_path_candidates_classifies_auth_ajax_and_do_endpoints_as_api(self) -> None:
+        scope = build_url_scope("https://example.com")
+        page_bucket: dict = {}
+        api_bucket: dict = {}
+
+        collect_path_candidates(
+            '"/auth/login" "/oauth/token" "/ajax/list" "/svc/user.do" "/login.do"',
+            "https://example.com",
+            "html:https://example.com",
+            scope,
+            page_bucket,
+            api_bucket,
+        )
+
+        self.assertIn("https://example.com/auth/login", api_bucket)
+        self.assertIn("https://example.com/oauth/token", api_bucket)
+        self.assertIn("https://example.com/ajax/list", api_bucket)
+        self.assertIn("https://example.com/svc/user.do", api_bucket)
+        self.assertIn("https://example.com/login.do", api_bucket)
+        self.assertEqual(page_bucket, {})
+
+    def test_collect_path_candidates_keeps_same_path_on_different_hosts(self) -> None:
+        scope = build_url_scope("https://app.example.com", include_subdomains=True)
+        page_bucket: dict = {}
+        api_bucket: dict = {}
+
+        collect_path_candidates(
+            '"https://app.example.com/users" "https://api.example.com/users"',
+            "https://app.example.com",
+            "html:https://app.example.com",
+            scope,
+            page_bucket,
+            api_bucket,
+        )
+
+        self.assertIn("https://app.example.com/users", page_bucket)
+        self.assertIn("https://api.example.com/users", page_bucket)
 
     def test_discover_once_tracks_discovered_vs_fetched_js_counts(self) -> None:
         config = Config(
@@ -513,6 +586,66 @@ class CodeReviewAlignmentTests(unittest.TestCase):
 
         token_findings = [item for item in findings if item.get("category") == "token"]
         self.assertEqual(len(token_findings), 2)
+
+    def test_collect_hardcoded_findings_detects_hyphenated_secret_keys(self) -> None:
+        findings: list[dict] = []
+        dedupe_keys: set[tuple[str, str, str, str, int, int]] = set()
+
+        collect_hardcoded_findings(
+            text='{"client-secret": "s3cr3t-value-123456", "access-token": "ghp_abcdefghijklmnopqrstuvwxyz"}',
+            source_url="https://example.com/app.js",
+            source_label="js:https://example.com/app.js",
+            source_type="js",
+            findings=findings,
+            dedupe_keys=dedupe_keys,
+        )
+
+        token_findings = [item for item in findings if item.get("category") == "token"]
+        self.assertGreaterEqual(len(token_findings), 2)
+        self.assertTrue(all(item.get("masked_value") != item.get("value") for item in token_findings))
+
+    def test_collect_hardcoded_findings_detects_provider_shaped_tokens_without_key_context(self) -> None:
+        findings: list[dict] = []
+        dedupe_keys: set[tuple[str, str, str, str, int, int]] = set()
+
+        collect_hardcoded_findings(
+            text=(
+                "const misc = 'AKIAABCDEFGHIJKLMNOP';"
+                "const miscJwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature';"
+                "const value = 'AIzaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';"
+            ),
+            source_url="https://example.com/app.js",
+            source_label="js:https://example.com/app.js",
+            source_type="js",
+            findings=findings,
+            dedupe_keys=dedupe_keys,
+        )
+
+        matched_by = {item.get("matched_by") for item in findings}
+        self.assertIn("regex.secret.aws_access_key", matched_by)
+        self.assertIn("regex.secret.jwt", matched_by)
+        self.assertIn("regex.secret.google_api_key", matched_by)
+
+    def test_collect_hardcoded_findings_ignores_masked_and_dynamic_secret_references(self) -> None:
+        findings: list[dict] = []
+        dedupe_keys: set[tuple[str, str, str, str, int, int]] = set()
+
+        collect_hardcoded_findings(
+            text=(
+                "const token = '********';"
+                "const apiKey = '<%= API_KEY %>';"
+                "const secret = 'vault:prod/api-key';"
+                "const sessionToken = '__SESSION_TOKEN__';"
+            ),
+            source_url="https://example.com/app.js",
+            source_label="js:https://example.com/app.js",
+            source_type="js",
+            findings=findings,
+            dedupe_keys=dedupe_keys,
+        )
+
+        self.assertFalse(any(item.get("category") == "token" for item in findings))
+        self.assertFalse(any(item.get("category") == "credential" for item in findings))
 
     def test_collect_hardcoded_findings_requires_context_for_international_phone(self) -> None:
         findings: list[dict] = []

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QSettings, QThread
+from PySide6.QtCore import QSettings, Qt, QThread
 from PySide6.QtWidgets import QApplication
 
 from route_api_discovery import CANCEL_MESSAGE, Config, build_summary_text
@@ -155,8 +155,8 @@ class GuiLanguageOptionTests(unittest.TestCase):
             self.assertEqual(window.card_sensitive_total_value.text(), "2")
             self.assertEqual(window.card_sensitive_high_value.text(), "1")
             self.assertEqual(window.sensitive_table.rowCount(), 2)
-            self.assertEqual(window.sensitive_table.item(0, 1).text(), "admin@example.com")
-            self.assertEqual(window.sensitive_table.item(1, 1).text(), "010-1234-5678")
+            self.assertEqual(window.sensitive_table.item(0, 1).text(), "a***@example.com")
+            self.assertEqual(window.sensitive_table.item(1, 1).text(), "010-****-5678")
         finally:
             window.close()
 
@@ -271,6 +271,10 @@ class GuiLanguageOptionTests(unittest.TestCase):
             self.assertTrue(window.save_again_button.isEnabled())
             self.assertIn("save failed", window.current_output_label.text())
             self.assertIn("example.com/admin", window.summary_text.toPlainText())
+
+            window.language_combo.setCurrentIndex(0)
+            self.assertEqual(window.last_save_error_message, "disk full")
+            self.assertEqual(window.last_error_message.count("disk full"), 1)
         finally:
             window._cleanup_save_worker()
             window.close()
@@ -295,6 +299,46 @@ class GuiLanguageOptionTests(unittest.TestCase):
             self.assertEqual(captured["output"], Path("discovery-result.json"))
         finally:
             window._cleanup_worker()
+            window.close()
+
+    def test_scan_inputs_lock_while_running_and_restore_when_ready(self) -> None:
+        window = DiscoveryWindow()
+        try:
+            window.recursive_scan_check.setChecked(True)
+
+            window._set_running_state()
+
+            self.assertFalse(window.url_input.isEnabled())
+            self.assertFalse(window.header_input.isEnabled())
+            self.assertFalse(window.max_js_spin.isEnabled())
+            self.assertFalse(window.recursive_depth_spin.isEnabled())
+            self.assertTrue(window.stop_button.isEnabled())
+
+            window._set_result_ready_state("done")
+
+            self.assertTrue(window.url_input.isEnabled())
+            self.assertTrue(window.header_input.isEnabled())
+            self.assertTrue(window.max_js_spin.isEnabled())
+            self.assertTrue(window.recursive_depth_spin.isEnabled())
+            self.assertFalse(window.stop_button.isEnabled())
+        finally:
+            window.close()
+
+    def test_table_cells_keep_full_tooltips_and_numeric_sorting(self) -> None:
+        window = DiscoveryWindow()
+        try:
+            window._populate_table(
+                window.api_table,
+                [
+                    ("404", "No", "GET", "/missing", "source", "https://example.com/missing"),
+                    ("200", "Yes", "GET", "/ok", "source", "https://example.com/ok"),
+                ],
+            )
+
+            self.assertEqual(window.api_table.item(0, 5).toolTip(), "https://example.com/missing")
+            window.api_table.sortItems(0, Qt.SortOrder.AscendingOrder)
+            self.assertEqual(window.api_table.item(0, 0).text(), "200")
+        finally:
             window.close()
 
     def test_get_save_output_path_normalizes_bundle_base_name(self) -> None:

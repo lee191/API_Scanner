@@ -402,7 +402,7 @@ class ScriptHtmlParser:
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="HTML과 JavaScript에서 페이지 경로와 API 엔드포인트를 추출합니다.")
-    parser.add_argument("--gui", action="store_true", help="PySide6 GUI를 엽니다.")
+    parser.add_argument("--gui", action="store_true", help="CustomTkinter GUI를 엽니다.")
     parser.add_argument("url", nargs="?", help="검사할 대상 URL")
     parser.add_argument("--max-js-files", type=int, default=50, help="가져올 JS 파일의 최대 개수(기본값: 50)")
     parser.add_argument("--max-depth", type=int, default=2, help="재귀 JS 탐색의 최대 깊이(기본값: 2)")
@@ -3655,12 +3655,12 @@ def gui_main(
 ) -> int:
     try:
         sys.modules.setdefault("route_api_discovery", sys.modules[__name__])
-        from route_api_discovery_qt import run_qt_gui
+        from route_api_discovery_ctk import run_customtkinter_gui
     except ImportError as exc:
-        print(f"PySide6 GUI를 사용할 수 없습니다: {exc}", file=sys.stderr)
+        print(f"CustomTkinter GUI를 사용할 수 없습니다: {exc}", file=sys.stderr)
         return 1
 
-    return run_qt_gui(
+    return run_customtkinter_gui(
         initial_url=initial_url,
         initial_output=initial_output,
         initial_js_output_dir=initial_js_output_dir,

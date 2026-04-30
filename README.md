@@ -1,6 +1,6 @@
 # Route API Discovery
 
-`Route API Discovery`는 대상 URL의 HTML과 JavaScript를 분석해 페이지 경로, API 엔드포인트, 하드코딩된 민감 정보 후보를 찾아내는 도구입니다. CLI와 PySide6 GUI를 제공하며 결과를 JSON, XLSX, HTML 형식으로 저장할 수 있습니다.
+`Route API Discovery`는 대상 URL의 HTML과 JavaScript를 분석해 페이지 경로, API 엔드포인트, 하드코딩된 민감 정보 후보를 찾아내는 도구입니다. CLI와 CustomTkinter 기반 GUI를 제공하며 결과를 JSON, XLSX, HTML 형식으로 저장할 수 있습니다.
 
 ## 주요 기능
 
@@ -15,7 +15,7 @@
 ## 요구 사항
 
 - Python 3.10 이상
-- PySide6
+- CustomTkinter
 - 대상 URL에 접근 가능한 네트워크 환경
 
 ## 설치
@@ -134,7 +134,8 @@ HTML 출력은 브라우저에서 열어 확인할 수 있는 리포트입니다
 ## 프로젝트 구조
 
 - `route_api_discovery.py`: 핵심 스캔 로직과 CLI
-- `route_api_discovery_qt.py`: PySide6 GUI
+- `route_api_discovery_ctk.py`: CustomTkinter GUI
+- `route_api_discovery_qt.py`: 레거시 PySide6 GUI
 - `app.py`: GUI 실행 진입점
 - `GUI/launcher.py`: GUI 런처 헬퍼
 - `tests/`: 단위 테스트 코드

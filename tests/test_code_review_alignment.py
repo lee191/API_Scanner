@@ -28,7 +28,6 @@ from route_api_discovery import (
     resolve_sensitive_findings,
     validate_js_output_dir,
 )
-from route_api_discovery_qt import ScanRequest, ScanWorker
 
 
 class _DummyHeaders:
@@ -724,30 +723,6 @@ class CodeReviewAlignmentTests(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].get("category"), "email")
 
-    def test_scan_worker_emits_finished_without_saving_results(self) -> None:
-        request = ScanRequest(
-            urls=["https://example.com"],
-            config=Config(
-                url="https://example.com",
-                max_js_files=1,
-                max_depth=0,
-                timeout=1.0,
-                output=Path("discovery-result.json"),
-                skip_probe=False,
-            ),
-        )
-        worker = ScanWorker(request)
-        failed_events: list[str] = []
-        finished_events: list[dict] = []
-
-        worker.failed.connect(lambda message: failed_events.append(message))
-        worker.finished.connect(lambda result: finished_events.append(result))
-
-        with patch("route_api_discovery_qt.discover_many", return_value=_minimal_batch_result()):
-            worker.run()
-
-        self.assertEqual(failed_events, [])
-        self.assertEqual(finished_events, [_minimal_batch_result()])
 
 
 if __name__ == "__main__":

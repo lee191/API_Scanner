@@ -13,7 +13,7 @@
 !/pyproject.toml
 !/app.py
 !/route_api_discovery.py
-!/route_api_discovery_qt.py
+!/route_api_discovery_ctk.py
 !/GUI/
 !/GUI/__init__.py
 !/GUI/launcher.py
@@ -26,7 +26,43 @@
 __pycache__/
 **/__pycache__/
 *.py[cod]
+
+# Virtual environments
 /.venv/
+/venv/
+/env/
+
+# Build & packaging artifacts
+*.egg-info/
+/dist/
+/build/
+*.egg
+
+# Tool caches
+/.pytest_cache/
+/.ruff_cache/
+/.mypy_cache/
+/.coverage
+/htmlcov/
+
+# Claude Code worktrees & session data
+/.claude/worktrees/
+/.claude/session-data/
+
+# Scan output files
 /mag/
 /discovery-result.*
 /mycsat.*
+*.xlsx
+*.html
+
+# Temporary / OS files
+*.tmp
+*.log
+_tmp_*
+.DS_Store
+Thumbs.db
+
+# Reference images
+*.png
+*.jpg

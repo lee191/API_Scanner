@@ -115,10 +115,23 @@ API_PATTERN_RE_LIST = (
     re.compile(r"""url\s*:\s*(?P<quote>["'`])(?P<value>[^"'`]+)(?P=quote)""", re.IGNORECASE),
     re.compile(r"""\.open\(\s*(?P<quote>["'`])[A-Z]+(?P=quote)\s*,\s*(?P<quote2>["'`])(?P<value>[^"'`]+)(?P=quote2)""", re.IGNORECASE),
     re.compile(r"""baseURL\s*:\s*(?P<quote>["'`])(?P<value>[^"'`]+)(?P=quote)""", re.IGNORECASE),
-    re.compile(r"""(?P<quote>["'`])(?P<value>/(?:api|graphql|rest)/[^"'`]*) (?P=quote)""".replace(" ", ""), re.IGNORECASE),
+    re.compile(
+        r"""(?<![A-Za-z0-9_])(?P<quote>["'`])(?P<value>/(?:api|graphql|rest)/[^"'`\s]*)(?P=quote)""",
+        re.IGNORECASE,
+    ),
+    # new WebSocket(...) / new EventSource(...) — realtime endpoints
+    re.compile(
+        r"""\bnew\s+(?:WebSocket|EventSource)\(\s*(?P<quote>["'`])(?P<value>[^"'`]+)(?P=quote)""",
+        re.IGNORECASE,
+    ),
+    # absolute ws:// or wss:// URLs in any quoted form
+    re.compile(
+        r"""(?P<quote>["'`])(?P<value>wss?://[^"'`\s]+)(?P=quote)""",
+        re.IGNORECASE,
+    ),
 )
-AXIOS_OBJECT_RE = re.compile(r"""axios\(\s*\{(?P<body>.*?)\}\s*\)""", re.IGNORECASE | re.DOTALL)
-SCRIPT_BLOCK_RE = re.compile(r"<script\b(?P<attrs>[^>]*)>(?P<body>.*?)</script\s*>", re.IGNORECASE | re.DOTALL)
+AXIOS_OBJECT_RE = re.compile(r"""axios\(\s*\{(?P<body>[^{}]{0,8192}?)\}\s*\)""", re.IGNORECASE | re.DOTALL)
+SCRIPT_BLOCK_RE = re.compile(r"<script\b(?P<attrs>[^>]*)>(?P<body>[\s\S]*?)</script\s*>", re.IGNORECASE)
 SCRIPT_SRC_RE = re.compile(r"""\bsrc\s*=\s*(?P<quote>["']?)(?P<value>[^"' >]+)(?P=quote)""", re.IGNORECASE)
 HARD_CODED_EMAIL_RE = re.compile(
     r"(?<![\w.+-])(?P<value>[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,24})(?![\w.-])"
@@ -151,6 +164,46 @@ HARD_CODED_SECRET_VALUE_PATTERNS = (
     (
         "slack_token",
         re.compile(r"(?<![A-Za-z0-9-])(?P<value>xox[baprs]-[A-Za-z0-9-]{10,})(?![A-Za-z0-9-])"),
+    ),
+    (
+        "stripe_key",
+        re.compile(r"(?<![A-Za-z0-9_])(?P<value>(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{20,})(?![A-Za-z0-9_])"),
+    ),
+    (
+        "private_key",
+        re.compile(r"(?P<value>-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----)"),
+    ),
+    (
+        "twilio_account_sid",
+        re.compile(r"(?<![A-Za-z0-9])(?P<value>AC[a-f0-9]{32})(?![A-Za-z0-9])"),
+    ),
+    (
+        "sendgrid_api_key",
+        re.compile(r"(?<![A-Za-z0-9])(?P<value>SG\.[A-Za-z0-9_-]{20,32}\.[A-Za-z0-9_-]{40,72})(?![A-Za-z0-9_-])"),
+    ),
+    (
+        "slack_webhook_url",
+        re.compile(r"(?P<value>https://hooks(?:\.|\[\.\])slack(?:\.|\[\.\])com/services/[A-Z0-9]{8,12}/[A-Z0-9]{8,12}/[A-Za-z0-9]{20,})"),
+    ),
+    (
+        "discord_webhook_url",
+        re.compile(r"(?P<value>https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d{15,21}/[A-Za-z0-9_-]{40,})"),
+    ),
+    (
+        "postgres_connection_string",
+        re.compile(r"(?P<value>postgres(?:ql)?://[^\s\"'`<>]{1,300}@[^\s\"'`<>/]{1,200}(?::\d{1,5})?(?:/[^\s\"'`<>]{0,200})?)"),
+    ),
+    (
+        "mysql_connection_string",
+        re.compile(r"(?P<value>mysql://[^\s\"'`<>]{1,300}@[^\s\"'`<>/]{1,200}(?::\d{1,5})?(?:/[^\s\"'`<>]{0,200})?)"),
+    ),
+    (
+        "mongodb_connection_string",
+        re.compile(r"(?P<value>mongodb(?:\+srv)?://[^\s\"'`<>]{1,300}@[^\s\"'`<>/]{1,200}(?::\d{1,5})?(?:/[^\s\"'`<>]{0,200})?)"),
+    ),
+    (
+        "redis_connection_string",
+        re.compile(r"(?P<value>rediss?://[^\s\"'`<>]{1,300}@[^\s\"'`<>/]{1,200}(?::\d{1,5})?(?:/[^\s\"'`<>]{0,30})?)"),
     ),
 )
 HARD_CODED_EMAIL_PLACEHOLDER_DOMAINS = {
@@ -1118,8 +1171,31 @@ def add_api_candidate(
     add_candidate(api_bucket, absolute_url, source, "api")
 
 
+_MIME_TYPE_PREFIXES = (
+    "application/", "audio/", "font/", "image/", "message/",
+    "model/", "multipart/", "text/", "video/",
+)
+
+
+def _looks_like_mime_type(value: str) -> bool:
+    lowered = value.strip().lower()
+    if "/" not in lowered:
+        return False
+    # only treat as a MIME type when there's no leading slash and no scheme
+    if lowered.startswith(("/", "http://", "https://", "ws://", "wss://")):
+        return False
+    return any(lowered.startswith(p) for p in _MIME_TYPE_PREFIXES)
+
+
 def _resolve_candidate_for_detection(base_url: str, raw_value: str, *, allow_disallowed_host: bool) -> Optional[str]:
     normalized_value = normalize_dynamic_url_candidate(raw_value)
+    if _looks_like_mime_type(normalized_value):
+        return None
+    # Map realtime schemes (ws, wss) onto http(s) so they share scope/probe handling.
+    if normalized_value.lower().startswith("wss://"):
+        normalized_value = "https://" + normalized_value[6:]
+    elif normalized_value.lower().startswith("ws://"):
+        normalized_value = "http://" + normalized_value[5:]
     return resolve_absolute_url(base_url, normalized_value, allow_disallowed_host=allow_disallowed_host)
 
 
@@ -1154,15 +1230,24 @@ def extract_axios_component_urls(text: str, base_url: str, *, allow_disallowed_h
     urls: List[str] = []
     for match in AXIOS_OBJECT_RE.finditer(text):
         body = match.group("body") or ""
-        if not _extract_named_url_value(body, "baseURL") or not _extract_named_url_value(body, "url"):
+        base_value = _extract_named_url_value(body, "baseURL")
+        path_value = _extract_named_url_value(body, "url")
+        if not base_value or not path_value:
             continue
-        for name in ("baseURL", "url"):
-            raw_value = _extract_named_url_value(body, name)
-            if not raw_value:
-                continue
+        base_candidate = normalize_dynamic_url_candidate(base_value)
+        path_candidate = normalize_dynamic_url_candidate(path_value)
+        joined_absolute: Optional[str] = None
+        if base_candidate and path_candidate:
+            joined_value = f"{base_candidate.rstrip('/')}/{path_candidate.lstrip('/')}"
+            joined_absolute = resolve_absolute_url(base_url, joined_value, allow_disallowed_host=allow_disallowed_host)
+        for raw_value in (base_value, path_value):
             absolute = _resolve_candidate_for_detection(base_url, raw_value, allow_disallowed_host=allow_disallowed_host)
-            if absolute:
-                urls.append(absolute)
+            if not absolute:
+                continue
+            if joined_absolute and absolute == joined_absolute:
+                # Don't discard the combined URL — it's the real endpoint.
+                continue
+            urls.append(absolute)
     return urls
 
 
@@ -1323,21 +1408,6 @@ def _mask_middle(value: str, visible_prefix: int = 4, visible_suffix: int = 4) -
 
 def _mask_hardcoded_value(category: str, value: str) -> str:
     raw = str(value or "").strip()
-    if not raw:
-        return ""
-    if category in HARD_CODED_SECRET_CATEGORIES:
-        return _mask_middle(raw)
-    if category == "email" and "@" in raw:
-        local, domain = raw.split("@", 1)
-        if not local:
-            return f"***@{domain}"
-        return f"{local[0]}***@{domain}"
-    if category == "phone":
-        digits = re.sub(r"\D", "", raw)
-        if len(digits) >= 4:
-            return f"***-****-{digits[-4:]}"
-    if category in {"person_name", "account_id", "user_id"}:
-        return _mask_middle(raw, visible_prefix=2, visible_suffix=2)
     return raw
 
 
@@ -1899,7 +1969,7 @@ def build_result_rows(
             future.cancel()
         raise
     finally:
-        executor_pool.shutdown(wait=True, cancel_futures=True)
+        executor_pool.shutdown(wait=True, cancel_futures=False)
     return [row for row in indexed_rows if row is not None]
 def filter_candidate_bucket_by_path(
     bucket: Dict[str, Candidate],
@@ -2752,7 +2822,7 @@ def build_hardcoded_sheet_rows(rows_data: List[dict]) -> List[List[object]]:
                 item.get("confidence", ""),
                 item.get("category", ""),
                 item.get("field_name", ""),
-                item.get("masked_value") or item.get("value", ""),
+                item.get("value") or item.get("masked_value", ""),
                 item.get("source_type", ""),
                 item.get("line", ""),
                 item.get("column", ""),
@@ -2893,6 +2963,15 @@ def _xlsx_column_widths(rows: List[List[object]]) -> List[int]:
     return widths
 
 
+_XLSX_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _sanitize_xlsx_text(value: str) -> str:
+    if value and value[0] in _XLSX_FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
+
 def xlsx_cell_xml(cell_ref: str, value: object, style_id: int = 0) -> str:
     if value is None:
         return ""
@@ -2904,7 +2983,7 @@ def xlsx_cell_xml(cell_ref: str, value: object, style_id: int = 0) -> str:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return f'<c r="{cell_ref}"{style_attr}><v>{value}</v></c>'
 
-    text = xml_escape(str(value), {"'": "&apos;", '"': "&quot;"})
+    text = xml_escape(_sanitize_xlsx_text(str(value)), {"'": "&apos;", '"': "&quot;"})
     return f'<c r="{cell_ref}" t="inlineStr"{style_attr}><is><t xml:space="preserve">{text}</t></is></c>'
 
 
@@ -3382,7 +3461,7 @@ def _build_html_sensitive_preview(findings: Sequence[dict]) -> str:
         severity_key = str(item.get("severity", "unknown") or "unknown").lower()
         severity = severity_key.upper()
         category = item.get("category") or item.get("type") or "unknown"
-        value = item.get("masked_value") or item.get("value") or "-"
+        value = item.get("value") or item.get("masked_value") or "-"
         source = item.get("source_url") or item.get("source_label") or "-"
         items.append(
             '<li class="finding-item">'

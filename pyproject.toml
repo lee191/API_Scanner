@@ -9,6 +9,7 @@ description = "URL에서 JavaScript를 수집하고 페이지 경로와 API 엔�
 requires-python = ">=3.10"
 dependencies = [
   "customtkinter>=5.2,<6",
+  "PySide6>=6.8,<7",
 ]
 authors = [
   { name = "Codex" }
@@ -19,4 +20,4 @@ route-api-discovery-gui = "app:main"
 
 [tool.setuptools]
 packages = ["GUI"]
-py-modules = ["app", "route_api_discovery", "route_api_discovery_ctk"]
+py-modules = ["app", "route_api_discovery", "route_api_discovery_ctk", "route_api_discovery_qt"]

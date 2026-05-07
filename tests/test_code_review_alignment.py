@@ -1,4 +1,6 @@
+import io
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -16,6 +18,7 @@ from route_api_discovery import (
     RecursiveDiscoveryState,
     discover,
     _discover_once,
+    _sanitize_xlsx_text,
     extract_html_assets,
     fetch_text,
     get_domain_key,
@@ -27,6 +30,7 @@ from route_api_discovery import (
     read_response_text,
     resolve_sensitive_findings,
     validate_js_output_dir,
+    xlsx_cell_xml,
 )
 
 
@@ -601,7 +605,7 @@ class CodeReviewAlignmentTests(unittest.TestCase):
 
         token_findings = [item for item in findings if item.get("category") == "token"]
         self.assertGreaterEqual(len(token_findings), 2)
-        self.assertTrue(all(item.get("masked_value") != item.get("value") for item in token_findings))
+        self.assertTrue(all(item.get("masked_value") == item.get("value") for item in token_findings))
 
     def test_collect_hardcoded_findings_detects_provider_shaped_tokens_without_key_context(self) -> None:
         findings: list[dict] = []
@@ -710,6 +714,77 @@ class CodeReviewAlignmentTests(unittest.TestCase):
 
         lines = build_summary_lines(result, Path("discovery-result.json"), language="en")
         self.assertTrue(any("Hardcoded findings: 1" in line for line in lines))
+
+    def test_sanitize_xlsx_text_prefixes_formula_chars(self) -> None:
+        for dangerous in ("=cmd|' /C calc'!A1", "+1+2", "-5", "@SUM(A1)", "\tlead", "\rlead"):
+            sanitized = _sanitize_xlsx_text(dangerous)
+            self.assertTrue(sanitized.startswith("'"), f"not sanitized: {dangerous!r}")
+            self.assertEqual(sanitized[1:], dangerous)
+
+    def test_sanitize_xlsx_text_leaves_plain_strings_alone(self) -> None:
+        for safe in ("/api/users", "https://example.com", "abc", "", "1.5"):
+            self.assertEqual(_sanitize_xlsx_text(safe), safe)
+
+    def test_xlsx_cell_xml_escapes_formula_prefix_in_string_cells(self) -> None:
+        xml = xlsx_cell_xml("A1", "=HYPERLINK(\"http://x\")")
+        self.assertIn("&apos;=HYPERLINK", xml)
+        self.assertNotIn("<v>=HYPERLINK", xml)
+
+    def test_xlsx_cell_xml_does_not_alter_numeric_cells(self) -> None:
+        xml = xlsx_cell_xml("A1", 42)
+        self.assertIn("<v>42</v>", xml)
+
+    def test_collect_hardcoded_findings_detects_stripe_secret_key(self) -> None:
+        findings: list = []
+        dedupe_keys: set = set()
+        text = "const misc = 'sk_live_" + "A" * 24 + "';"
+        collect_hardcoded_findings(
+            text=text,
+            source_url="https://example.com/app.js",
+            source_label="js:https://example.com/app.js",
+            source_type="js",
+            findings=findings,
+            dedupe_keys=dedupe_keys,
+        )
+        matched_by = {f.get("matched_by") for f in findings}
+        self.assertIn("regex.secret.stripe_key", matched_by)
+
+    def test_collect_hardcoded_findings_detects_private_key_header(self) -> None:
+        findings: list = []
+        dedupe_keys: set = set()
+        text = "const data = `-----BEGIN RSA PRIVATE KEY-----`;"
+        collect_hardcoded_findings(
+            text=text,
+            source_url="https://example.com/app.js",
+            source_label="js:https://example.com/app.js",
+            source_type="js",
+            findings=findings,
+            dedupe_keys=dedupe_keys,
+        )
+        matched_by = {f.get("matched_by") for f in findings}
+        self.assertIn("regex.secret.private_key", matched_by)
+
+    def test_main_emits_ssl_warning_to_stderr_when_verify_disabled(self) -> None:
+        from route_api_discovery import main as cli_main
+        captured = io.StringIO()
+        with TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "out.json"
+            argv = [
+                "https://example.com",
+                "--no-verify-ssl",
+                "--skip-probe",
+                "--output",
+                str(output_path),
+            ]
+            with patch("route_api_discovery.discover", return_value={"input_url": "https://example.com",
+                                                                       "scanned_at": "1970-01-01T00:00:00Z",
+                                                                       "summary": {}}), \
+                 patch("route_api_discovery.save_result", return_value=output_path), \
+                 patch("route_api_discovery.print_summary"), \
+                 redirect_stderr(captured):
+                rc = cli_main(argv)
+        self.assertEqual(rc, 0)
+        self.assertIn("SSL", captured.getvalue())
 
     def test_resolve_sensitive_findings_falls_back_when_hardcoded_list_is_empty(self) -> None:
         result = {

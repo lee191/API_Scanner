@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Detection Benchmark</title>
+<link rel="preload" href="/api/preload/init" as="fetch" crossorigin>
+<link rel="prefetch" href="/api/prefetch/menu">
+<link rel="dns-prefetch" href="//cdn.example.com">
+<script id="__NEXT_DATA__" type="application/json">{"buildId":"abc","props":{"pageProps":{"endpoint":"/api/next-data/feed"}}}</script>
+</head>
+<body data-api="/api/data-attr/config" data-endpoint="/api/data-attr/users">
+  <div data-href="/admin/data-attr-page" data-src="/static/asset.js"></div>
+  <script src="app.js"></script>
+  <script>
+    // Inline detection samples (must also be picked up)
+    fetch('/api/inline/health');
+    this.http.get('/api/inline/angular');
+  </script>
+</body>
+</html>

@@ -30,47 +30,33 @@ from route_api_discovery import (
 # ── Palette ───────────────────────────────────────────────────────────────────
 
 LIGHT = dict(
-    window="#F3F5F7", surface="#FFFFFF", surface2="#F6F9FC",
-    border="#DDE3EA", border2="#CAD5DF",
-    text="#1F2937", text2="#4B5563", muted="#6B7280", subtle="#9CA3AF",
+    window="#F3F5F7", surface="#FFFFFF", surface2="#F8FAFC",
+    border="#CBD5E1", border2="#94A3B8",
+    text="#111827", text2="#374151", muted="#4B5563", subtle="#64748B",
+    disabled_bg="#EEF2F6", disabled_fg="#7A869A", border_disabled="#CBD5E1",
+    action_bg="#0F8FA3", action_hover="#0C7485", action_text="#FFFFFF",
     accent="#0F8FA3", accent_dark="#0C7485",
     chip_bg="#E0F2FE", chip_fg="#075985",
     badge_idle="#E0F2FE", badge_idle_fg="#075985",
     badge_run="#FEF3C7",  badge_run_fg="#92400E",
+    badge_save="#DBEAFE", badge_save_fg="#1E40AF",
     badge_done="#DCFCE7", badge_done_fg="#166534",
     badge_err="#FEE2E2",  badge_err_fg="#991B1B",
     m_summary="#475569", m_success="#16A34A", m_sensitive="#DC2626", m_js="#2563EB",
     m_pages="#7C3AED",   m_apis="#0891B2",
-    row_alt="#F8FAFC",   sel_bg="#DBEAFE", sel_fg="#1E40AF",
-    tree_header="#F1F5F9",
+    row_alt="#F1F5F9",   sel_bg="#DBEAFE", sel_fg="#1E40AF",
+    tree_header="#E2E8F0",
+    field_bg="#F8FAFC", field_border="#94A3B8", field_focus="#0F8FA3",
+    table_bg="#FFFFFF", table_header_bg="#E2E8F0", table_row_alt="#F1F5F9",
+    table_selected_bg="#DBEAFE", table_selected_fg="#1E40AF",
+    tab_selected_bg="#0F8FA3", tab_hover="#E2E8F0",
     method_get="#16A34A", method_post="#2563EB", method_put="#D97706",
     method_patch="#7C3AED", method_del="#DC2626",
     method_head="#0891B2", method_other="#64748B",
     sb_bg="#F1F5F9",
 )
-DARK = dict(
-    window="#0F1523", surface="#161D2E", surface2="#1C2538",
-    border="#2A3349", border2="#334155",
-    text="#E2E8F0", text2="#CBD5E1", muted="#94A3B8", subtle="#64748B",
-    accent="#22D3EE", accent_dark="#0E7490",
-    chip_bg="#1E3A5F", chip_fg="#BFDBFE",
-    badge_idle="#1E3A5F", badge_idle_fg="#BFDBFE",
-    badge_run="#4C3314",  badge_run_fg="#FCD34D",
-    badge_done="#123524", badge_done_fg="#86EFAC",
-    badge_err="#4C1D1D",  badge_err_fg="#FCA5A5",
-    m_summary="#94A3B8", m_success="#4ADE80", m_sensitive="#F87171", m_js="#60A5FA",
-    m_pages="#A78BFA",   m_apis="#22D3EE",
-    row_alt="#1C2538",   sel_bg="#1E3A5F", sel_fg="#BFDBFE",
-    tree_header="#1A2236",
-    method_get="#4ADE80", method_post="#60A5FA", method_put="#FBBF24",
-    method_patch="#C084FC", method_del="#F87171",
-    method_head="#22D3EE", method_other="#94A3B8",
-    sb_bg="#131B2B",
-)
-
-
 def _pal() -> dict:
-    return DARK if ctk.get_appearance_mode() == "Dark" else LIGHT
+    return LIGHT
 
 
 # ── Texts ─────────────────────────────────────────────────────────────────────
@@ -86,6 +72,7 @@ KO: Dict[str, str] = {
     "saving": "저장 중", "done": "완료", "error": "오류",
     "target_url": "대상 URL",
     "url_hint": "한 줄에 URL 하나씩 입력",
+    "url_help": "여러 대상은 줄바꿈으로 추가하세요. 스캔은 입력 순서대로 실행됩니다.",
     "output_file": "출력 파일 경로",
     "output_hint": "결과 기본 파일명",
     "browse": "찾아보기",
@@ -109,20 +96,20 @@ KO: Dict[str, str] = {
     "excluded_sub": "제외 서브도메인",
     "excluded_hint": "예: cdn.example.com",
     "js_dir": "JS 저장 폴더",
-    "results": "Results",
-    "m_summary": "Summary", "m_success": "Success",
-    "m_js": "JS Files", "m_pages": "Pages", "m_apis": "APIs",
-    "filter_hint": "Enter text to filter",
-    "quantity": "Quantity", "url_type": "URL Type",
-    "status_code": "Status Code",
-    "all": "All", "reset": "Reset",
-    "col_method": "Method", "col_endpoint": "Endpoint",
-    "col_source": "Source", "col_status": "Status Code",
-    "col_params": "Parameters", "col_sensitive": "Sensitive",
-    "col_severity": "Severity", "col_ctype": "Content Type",
-    "log": "Log", "col_ts": "Timestamp", "col_msg": "Message",
+    "results": "탐색 결과",
+    "m_summary": "스캔", "m_success": "성공",
+    "m_js": "JS 파일", "m_pages": "페이지", "m_apis": "API",
+    "filter_hint": "경로, 출처, 콘텐츠 유형 검색",
+    "quantity": "표시 개수", "url_type": "메서드",
+    "status_code": "상태 코드",
+    "all": "전체", "reset": "초기화",
+    "col_method": "메서드", "col_endpoint": "엔드포인트",
+    "col_source": "출처", "col_status": "상태 코드",
+    "col_params": "파라미터", "col_sensitive": "민감정보",
+    "col_severity": "심각도", "col_ctype": "콘텐츠 유형",
+    "log": "실행 로그", "col_ts": "시간", "col_msg": "메시지",
     "clear": "지우기", "save_log": "로그 저장",
-    "language": "언어", "dark_mode": "다크 모드",
+    "language": "언어",
     "result_selector": "결과 선택",
     "result_item": "{i}. [{s}] {u}",
     "no_scan": "실행 중인 스캔이 없습니다.",
@@ -137,17 +124,19 @@ KO: Dict[str, str] = {
     "save_ok": "저장 완료: {path}",
     "save_fail": "저장 실패: {msg}",
     "err_prefix": "[오류] {msg}",
-    "workers_label": "Workers: {n}",
-    "rate_label": "Rate: {r} req/s",
-    "queue_label": "Queue: {n}",
-    "errors_label": "Errors: {n}",
+    "workers_label": "작업자: {n}",
+    "rate_label": "속도: {r} req/s",
+    "queue_label": "대기열: {n}",
+    "errors_label": "오류: {n}",
     "elapsed": "{h:02d}:{m:02d}:{s:02d}",
-    "req_count": "Requests: {n}",
-    "dissimilar": "Dissimilar: {n}",
+    "req_count": "요청: {n}",
+    "dissimilar": "표시 행: {n}",
     "import_hint": "Header-Name: value 형식으로 입력",
     "header_edit_title": "헤더 편집",
     "cell_detail": "셀 상세",
     "copy": "복사", "close": "닫기",
+    "empty_title": "아직 표시할 결과가 없습니다",
+    "empty_hint": "대상 URL을 입력하고 실행하면 발견된 API, 페이지, JS 파일, 민감정보가 여기에 정리됩니다.",
 }
 
 EN: Dict[str, str] = {**KO,
@@ -158,6 +147,7 @@ EN: Dict[str, str] = {**KO,
     "saving": "Saving", "done": "Done", "error": "Error",
     "target_url": "Target URLs",
     "url_hint": "Enter one URL per line",
+    "url_help": "Add multiple targets on separate lines. Scans run in the order shown.",
     "output_file": "Output File Path",
     "output_hint": "Base filename for results",
     "browse": "Browse",
@@ -191,7 +181,7 @@ EN: Dict[str, str] = {**KO,
     "col_severity": "Severity", "col_ctype": "Content Type",
     "log": "Log", "col_ts": "Timestamp", "col_msg": "Message",
     "clear": "Clear", "save_log": "Save Log",
-    "language": "Language", "dark_mode": "Dark Mode",
+    "language": "Language",
     "result_selector": "Select Result",
     "no_scan": "No active scan.",
     "already_running": "A scan is already running.",
@@ -205,10 +195,18 @@ EN: Dict[str, str] = {**KO,
     "save_ok": "Saved: {path}",
     "save_fail": "Save failed: {msg}",
     "err_prefix": "[Error] {msg}",
+    "workers_label": "Workers: {n}",
+    "rate_label": "Rate: {r} req/s",
+    "queue_label": "Queue: {n}",
+    "errors_label": "Errors: {n}",
+    "req_count": "Requests: {n}",
+    "dissimilar": "Rows: {n}",
     "import_hint": "Enter in Header-Name: value format",
     "header_edit_title": "Edit Header",
     "cell_detail": "Cell Detail",
     "copy": "Copy", "close": "Close",
+    "empty_title": "No results to display yet",
+    "empty_hint": "Enter target URLs and run a scan to review APIs, pages, JS files, and sensitive findings here.",
 }
 
 TEXTS = {"ko": KO, "en": EN}
@@ -216,10 +214,14 @@ TEXTS = {"ko": KO, "en": EN}
 KO.update({
     "m_sensitive": "민감정보",
     "tab_apis": "APIs",
-    "tab_pages": "Pages",
-    "tab_js": "JS Files",
-    "tab_sensitive": "Sensitive",
-    "tab_responses": "Responses",
+    "tab_pages": "페이지",
+    "tab_js": "JS 파일",
+    "tab_sensitive": "민감정보",
+    "tab_responses": "전체 결과",
+    "filetype_excel_html": "Excel/HTML",
+    "filetype_log": "로그 파일",
+    "filetype_all": "모든 파일",
+    "save_log_error_title": "로그 저장 실패",
 })
 EN.update({
     "m_sensitive": "Sensitive",
@@ -227,7 +229,11 @@ EN.update({
     "tab_pages": "Pages",
     "tab_js": "JS Files",
     "tab_sensitive": "Sensitive",
-    "tab_responses": "Responses",
+    "tab_responses": "All Results",
+    "filetype_excel_html": "Excel/HTML",
+    "filetype_log": "Log files",
+    "filetype_all": "All files",
+    "save_log_error_title": "Save log failed",
 })
 
 
@@ -252,23 +258,28 @@ def _style_treeview() -> None:
     s = ttk.Style()
     s.theme_use("default")
     for name, bg, fg, hdr in [
-        ("Results.Treeview", p["surface"], p["text"], p["tree_header"]),
-        ("Log.Treeview",     p["surface"], p["text"], p["tree_header"]),
+        ("Results.Treeview", p["table_bg"], p["text"], p["table_header_bg"]),
+        ("Log.Treeview",     p["table_bg"], p["text"], p["table_header_bg"]),
     ]:
+        row_height = 30 if name == "Results.Treeview" else 28
         s.configure(name,
             background=bg, foreground=fg, fieldbackground=bg,
-            borderwidth=0, relief="flat", rowheight=26,
+            borderwidth=0, relief="flat", rowheight=row_height,
             font=("Segoe UI", 11),
         )
         s.configure(f"{name}.Heading",
             background=hdr, foreground=p["text"],
             borderwidth=0, relief="flat",
-            font=("Segoe UI", 11, "bold"),
-            padding=(6, 6),
+            font=("Segoe UI", 12, "bold"),
+            padding=(8, 8),
+        )
+        s.map(f"{name}.Heading",
+            background=[("active", p["border"]), ("pressed", p["border2"])],
+            foreground=[("active", p["text"])],
         )
         s.map(name,
-            background=[("selected", p["sel_bg"])],
-            foreground=[("selected", p["sel_fg"])],
+            background=[("selected", p["table_selected_bg"])],
+            foreground=[("selected", p["table_selected_fg"])],
         )
         s.layout(name, [("Treeview.treearea", {"sticky": "nswe"})])
 
@@ -309,6 +320,7 @@ class CtkDiscoveryApp(ctk.CTk):
         initial_output: Optional[str] = None,
         initial_js_output_dir: Optional[str] = None,
     ) -> None:
+        ctk.set_appearance_mode("Light")
         super().__init__()
 
         # State
@@ -332,18 +344,18 @@ class CtkDiscoveryApp(ctk.CTk):
         # Tk vars
         self._state_text   = tk.StringVar(value="")
         self._elapsed_text = tk.StringVar(value="00:00:00")
-        self._req_text     = tk.StringVar(value="Requests: 0")
-        self._rate_text    = tk.StringVar(value="Rate: 0 req/s")
+        self._req_text     = tk.StringVar(value=_t(self._lang, "req_count", n=0))
+        self._rate_text    = tk.StringVar(value=_t(self._lang, "rate_label", r="0.0"))
         self._result_sel   = tk.StringVar(value="")
         self._filter_var   = tk.StringVar()
         self._qty_var      = tk.StringVar()
         self._type_var     = tk.StringVar()
         self._status_var   = tk.StringVar()
         self._tab_var      = tk.StringVar(value="")
-        self._workers_text = tk.StringVar(value="Workers: 0")
-        self._sb_rate_text = tk.StringVar(value="Rate: 0 req/s")
-        self._queue_text   = tk.StringVar(value="Queue: 0")
-        self._errors_text  = tk.StringVar(value="Errors: 0")
+        self._workers_text = tk.StringVar(value=_t(self._lang, "workers_label", n=0))
+        self._sb_rate_text = tk.StringVar(value=_t(self._lang, "rate_label", r="0.0"))
+        self._queue_text   = tk.StringVar(value=_t(self._lang, "queue_label", n=0))
+        self._errors_text  = tk.StringVar(value=_t(self._lang, "errors_label", n=0))
 
         # Scan option vars
         self._recursive_var   = tk.BooleanVar(value=False)
@@ -370,8 +382,11 @@ class CtkDiscoveryApp(ctk.CTk):
 
         _style_treeview()
         self._build_all(initial_url or "", initial_output or "discovery-result")
+        self._repaint_ctk_widgets(_pal())
         self._set_state("idle")
         self._refresh_all_texts()
+
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
 
     # ── Top-level layout ──────────────────────────────────────────────────────
 
@@ -390,7 +405,7 @@ class CtkDiscoveryApp(ctk.CTk):
         p = _pal()
         bar = tk.Frame(self, bg=p["surface"], height=60)
         bar.grid(row=row, column=0, sticky="ew")
-        bar.grid_columnconfigure(3, weight=1)
+        bar.grid_columnconfigure(4, weight=1)
         bar.grid_propagate(False)
 
         # 1) App identity
@@ -421,8 +436,8 @@ class CtkDiscoveryApp(ctk.CTk):
 
         self._ui["run_btn"] = ctk.CTkButton(
             btn_f, text=_t(self._lang, "run"), width=96, height=34,
-            fg_color=p["accent"], hover_color=p["accent_dark"],
-            text_color="#FFFFFF", font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=p["action_bg"], hover_color=p["action_hover"],
+            text_color=p["action_text"], font=ctk.CTkFont(size=13, weight="bold"),
             corner_radius=6, command=self._on_run,
         )
         self._ui["run_btn"].pack(side="left", padx=(0, 6))
@@ -448,11 +463,11 @@ class CtkDiscoveryApp(ctk.CTk):
 
         # 5) Status strip (stretches)
         status_f = tk.Frame(bar, bg=p["surface"])
-        status_f.grid(row=0, column=3, padx=(0, 0), pady=10, sticky="ew")
-        bar.grid_columnconfigure(3, weight=1)
+        status_f.grid(row=0, column=4, padx=(0, 0), pady=10, sticky="ew")
+        bar.grid_columnconfigure(4, weight=1)
 
         self._ui["exec_lbl"] = tk.Label(status_f, text=_t(self._lang, "exec_status"),
-                                        bg=p["surface"], fg=p["muted"],
+                                        bg=p["surface"], fg=p["text2"],
                                         font=("Segoe UI", 10))
         self._ui["exec_lbl"].pack(side="left", padx=(0, 6))
 
@@ -475,15 +490,14 @@ class CtkDiscoveryApp(ctk.CTk):
             self._ui[key] = lbl
 
         # 6) Spacer
-        tk.Frame(bar, bg=p["surface"]).grid(row=0, column=4, sticky="ew")
-        bar.grid_columnconfigure(4, weight=1)
+        tk.Frame(bar, bg=p["surface"]).grid(row=0, column=5, sticky="ew")
 
         # 7) Right controls
         right_f = tk.Frame(bar, bg=p["surface"])
-        right_f.grid(row=0, column=5, padx=(0, 16), pady=10, sticky="e")
+        right_f.grid(row=0, column=6, padx=(0, 16), pady=10, sticky="e")
 
         self._ui["lang_lbl"] = tk.Label(right_f, text=_t(self._lang, "language"),
-                                        bg=p["surface"], fg=p["muted"],
+                                        bg=p["surface"], fg=p["text2"],
                                         font=("Segoe UI", 10))
         self._ui["lang_lbl"].pack(side="left", padx=(0, 4))
 
@@ -498,16 +512,6 @@ class CtkDiscoveryApp(ctk.CTk):
         )
         self._ui["lang_combo"].set("한국어")
         self._ui["lang_combo"].pack(side="left", padx=(0, 10))
-
-        self._ui["dark_switch"] = ctk.CTkSwitch(
-            right_f, text=_t(self._lang, "dark_mode"),
-            command=self._on_toggle_dark,
-            width=48, font=ctk.CTkFont(size=11),
-            onvalue=True, offvalue=False,
-        )
-        if ctk.get_appearance_mode() == "Dark":
-            self._ui["dark_switch"].select()
-        self._ui["dark_switch"].pack(side="left", padx=(0, 10))
 
         self._ui["settings_btn"] = ctk.CTkButton(
             right_f, text=_t(self._lang, "settings"), width=92, height=30,
@@ -581,12 +585,18 @@ class CtkDiscoveryApp(ctk.CTk):
     def _left_card_urls(self, parent, row: int, initial_url: str) -> int:
         p = _pal()
         body, _ = self._section_card(parent, row, "target_url")
+        self._ui["url_help_lbl"] = tk.Label(
+            body, text=_t(self._lang, "url_help"),
+            bg=p["surface"], fg=p["muted"],
+            font=("Segoe UI", 10), anchor="w",
+        )
+        self._ui["url_help_lbl"].grid(row=0, column=0, sticky="ew", pady=(0, 6))
         self._ui["url_box"] = ctk.CTkTextbox(
             body, height=88, font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=p["surface2"], border_color=p["border"], border_width=1,
             text_color=p["text"],
         )
-        self._ui["url_box"].grid(row=0, column=0, sticky="ew")
+        self._ui["url_box"].grid(row=1, column=0, sticky="ew")
         if initial_url:
             self._ui["url_box"].insert("0.0", initial_url)
         return row + 1
@@ -704,7 +714,7 @@ class CtkDiscoveryApp(ctk.CTk):
             sub = tk.Frame(num_f, bg=p["surface"])
             sub.grid(row=sub_r, column=col, padx=(0, 12), pady=2, sticky="nw")
             lbl = tk.Label(sub, text=_t(self._lang, key), bg=p["surface"],
-                           fg=p["muted"], font=("Segoe UI", 10))
+                           fg=p["text2"], font=("Segoe UI", 10))
             lbl.pack(anchor="w")
             self._ui[f"lbl_{key}"] = lbl
             inc = 0.5 if fl else 1
@@ -713,7 +723,11 @@ class CtkDiscoveryApp(ctk.CTk):
                               bg=p["surface2"], fg=p["text"],
                               relief="flat", highlightthickness=1,
                               highlightbackground=p["border"],
-                              buttonbackground=p["border2"])
+                              buttonbackground=p["border2"],
+                              insertbackground=p["text"],
+                              disabledbackground=p["disabled_bg"],
+                              disabledforeground=p["disabled_fg"],
+                              readonlybackground=p["surface2"])
             spin.pack(anchor="w")
             self._ui[f"spin_{key}"] = spin
 
@@ -728,7 +742,7 @@ class CtkDiscoveryApp(ctk.CTk):
             ("js_dir",      self._jsdir_var,  ""),
         ]):
             lbl = tk.Label(body, text=_t(self._lang, key), bg=p["surface"],
-                           fg=p["muted"], font=("Segoe UI", 10), anchor="w")
+                           fg=p["text2"], font=("Segoe UI", 10), anchor="w")
             lbl.grid(row=i * 2, column=0, sticky="w", pady=(4 if i else 0, 0))
             self._ui[f"lbl_adv_{key}"] = lbl
             ent = ctk.CTkEntry(body, textvariable=var, height=30,
@@ -776,7 +790,7 @@ class CtkDiscoveryApp(ctk.CTk):
         sel_f = tk.Frame(hdr, bg=p["surface"])
         sel_f.grid(row=0, column=1, columnspan=2, padx=14, pady=(12, 8), sticky="e")
         self._ui["sel_lbl"] = tk.Label(sel_f, text=_t(self._lang, "result_selector"),
-                                       bg=p["surface"], fg=p["muted"],
+                                       bg=p["surface"], fg=p["text2"],
                                        font=("Segoe UI", 10))
         self._ui["sel_lbl"].pack(side="left", padx=(0, 6))
         self._ui["result_combo"] = ctk.CTkComboBox(
@@ -808,7 +822,7 @@ class CtkDiscoveryApp(ctk.CTk):
                             highlightthickness=1, highlightbackground=p["border"])
             card.grid(row=0, column=idx, padx=4, sticky="ew")
             card.grid_propagate(False)
-            t = tk.Label(card, text=title, bg=p["surface2"], fg=p["muted"],
+            t = tk.Label(card, text=title, bg=p["surface2"], fg=p["text2"],
                          font=("Segoe UI", 10, "bold"))
             t.place(relx=0.5, rely=0.25, anchor="center")
             v = tk.Label(card, text="0", bg=p["surface2"], fg=color,
@@ -817,6 +831,15 @@ class CtkDiscoveryApp(ctk.CTk):
             self._ui[f"mt_{key}"] = t
             setattr(self, attr, v)
 
+    def _tab_values(self) -> List[str]:
+        return [
+            _t(self._lang, "tab_apis"),
+            _t(self._lang, "tab_pages"),
+            _t(self._lang, "tab_js"),
+            _t(self._lang, "tab_sensitive"),
+            _t(self._lang, "tab_responses"),
+        ]
+
     def _build_filter_bar(self, parent: tk.Frame, row: int) -> None:
         p = _pal()
         bar = tk.Frame(parent, bg=p["surface"], highlightthickness=1,
@@ -824,18 +847,12 @@ class CtkDiscoveryApp(ctk.CTk):
         bar.grid(row=row, column=0, sticky="ew", pady=(0, 6))
         bar.grid_columnconfigure(1, weight=1)
 
-        tab_values = [
-            _t(self._lang, "tab_apis"),
-            _t(self._lang, "tab_pages"),
-            _t(self._lang, "tab_js"),
-            _t(self._lang, "tab_sensitive"),
-            _t(self._lang, "tab_responses"),
-        ]
+        tab_values = self._tab_values()
         self._tab_var.set(tab_values[0])
         self._ui["tab_selector"] = ctk.CTkSegmentedButton(
             bar, values=tab_values, variable=self._tab_var,
-            height=30, selected_color=p["accent"],
-            selected_hover_color=p["accent_dark"],
+            height=30, selected_color=p["action_bg"],
+            selected_hover_color=p["action_hover"],
             unselected_color=p["surface2"],
             unselected_hover_color=p["border"],
             text_color=p["text"],
@@ -872,7 +889,7 @@ class CtkDiscoveryApp(ctk.CTk):
             ("status_code", self._status_var, [all_lbl, "200", "201", "301", "302", "400", "401", "403", "404", "500"], 130),
         ], start=1):
             lbl = tk.Label(bar, text=_t(self._lang, key) + ":",
-                           bg=p["surface"], fg=p["muted"],
+                           bg=p["surface"], fg=p["text2"],
                            font=("Segoe UI", 10))
             lbl.grid(row=1, column=col_idx * 2, padx=(8, 2), pady=8)
             self._ui[f"filter_lbl_{key}"] = lbl
@@ -892,7 +909,7 @@ class CtkDiscoveryApp(ctk.CTk):
         # Dissimilar count label
         self._ui["dissimilar_lbl"] = tk.Label(
             bar, text=_t(self._lang, "dissimilar", n=0),
-            bg=p["surface"], fg=p["muted"], font=("Segoe UI", 10),
+            bg=p["surface"], fg=p["text2"], font=("Segoe UI", 10),
         )
         self._ui["dissimilar_lbl"].grid(row=1, column=8, padx=(6, 4), pady=8)
 
@@ -944,8 +961,145 @@ class CtkDiscoveryApp(ctk.CTk):
             ("JS", "m_js"), ("PAGE", "m_pages"),
         ]:
             self._ui["tree"].tag_configure(f"m_{method}", foreground=mp[color_key])
-        self._ui["tree"].tag_configure("alt", background=p["row_alt"])
+        self._ui["tree"].tag_configure("alt", background=p["table_row_alt"])
+        self._ui["tree"].tag_configure("empty", foreground=p["text2"], background=p["field_bg"])
+        self._ui["tree"].tag_configure("sensitive_row", foreground=p["m_sensitive"])
+        self._ui["tree"].tag_configure("status_error", foreground=p["badge_err_fg"])
+        self._ui["tree"].tag_configure("status_warn", foreground=p["method_put"])
         self._ui["tree"].bind("<Double-1>", self._on_tree_dbl)
+        self._show_empty_state()
+
+    def _configure_button_role(self, key: str, role: str, p: dict) -> None:
+        widget = self._ui.get(key)
+        if widget is None:
+            return
+        styles = {
+            "primary": dict(
+                fg_color=p["action_bg"], hover_color=p["action_hover"],
+                border_color=p["border2"], border_width=1,
+                text_color=p["action_text"], text_color_disabled=p["disabled_fg"],
+            ),
+            "secondary": dict(
+                fg_color=p["surface2"], hover_color=p["border2"],
+                border_color=p["border"], text_color=p["text2"],
+                text_color_disabled=p["disabled_fg"],
+            ),
+        }
+        try:
+            widget.configure(**styles[role])
+        except Exception:
+            pass
+
+    def _configure_input_role(self, key: str, p: dict) -> None:
+        widget = self._ui.get(key)
+        if widget is None:
+            return
+        try:
+            widget.configure(
+                fg_color=p["field_bg"], border_color=p["field_border"],
+                text_color=p["text"], placeholder_text_color=p["subtle"],
+            )
+        except Exception:
+            try:
+                widget.configure(
+                    fg_color=p["field_bg"], border_color=p["field_border"],
+                    text_color=p["text"],
+                )
+            except Exception:
+                pass
+        try:
+            widget.configure(text_color_disabled=p["disabled_fg"])
+        except Exception:
+            pass
+
+    def _configure_combo_role(self, key: str, p: dict) -> None:
+        widget = self._ui.get(key)
+        if widget is None:
+            return
+        try:
+            widget.configure(
+                fg_color=p["field_bg"], border_color=p["field_border"],
+                button_color=p["border"], button_hover_color=p["border2"],
+                text_color=p["text2"], dropdown_fg_color=p["surface"],
+                dropdown_hover_color=p["surface2"],
+                dropdown_text_color=p["text"],
+            )
+        except Exception:
+            pass
+
+    def _configure_dialog(self, dlg: ctk.CTkToplevel, p: dict) -> None:
+        try:
+            dlg.configure(fg_color=p["surface"])
+        except Exception:
+            try:
+                dlg.configure(bg=p["surface"])
+            except Exception:
+                pass
+
+    def _dialog_button(self, parent, text: str, command, width: int = 76) -> ctk.CTkButton:
+        p = _pal()
+        return ctk.CTkButton(
+            parent, text=text, width=width,
+            fg_color=p["surface2"], hover_color=p["tab_hover"],
+            border_color=p["border"], border_width=1,
+            text_color=p["text2"], text_color_disabled=p["disabled_fg"],
+            command=command,
+        )
+
+    def _repaint_ctk_widgets(self, p: dict) -> None:
+        for key in ("run_btn",):
+            self._configure_button_role(key, "primary", p)
+        for key in (
+            "save_btn", "stop_btn", "settings_btn", "browse_btn", "reset_btn",
+            "hdr_add_btn", "hdr_edit_btn", "hdr_remove_btn", "hdr_import__btn",
+            "log_save_log_btn", "log_clear_btn",
+        ):
+            self._configure_button_role(key, "secondary", p)
+        for key in (
+            "url_box", "output_entry", "filter_entry",
+            "ent_adv_proxy", "ent_adv_excluded_sub", "ent_adv_js_dir",
+        ):
+            self._configure_input_role(key, p)
+        for key in (
+            "lang_combo", "result_combo", "filter_combo_quantity",
+            "filter_combo_url_type", "filter_combo_status_code",
+        ):
+            self._configure_combo_role(key, p)
+        for key in ("recursive_scan", "include_subdomains", "skip_probe", "verify_ssl"):
+            widget = self._ui.get(f"chk_{key}")
+            if widget is not None:
+                try:
+                    widget.configure(
+                        fg_color=p["accent"], hover_color=p["accent_dark"],
+                        border_color=p["border2"], text_color=p["text2"],
+                        text_color_disabled=p["disabled_fg"],
+                    )
+                except Exception:
+                    pass
+        if "tab_selector" in self._ui:
+            try:
+                self._ui["tab_selector"].configure(
+                    selected_color=p["tab_selected_bg"],
+                    selected_hover_color=p["action_hover"],
+                    unselected_color=p["surface2"],
+                    unselected_hover_color=p["tab_hover"],
+                    text_color=p["text"],
+                    text_color_disabled=p["disabled_fg"],
+                )
+            except Exception:
+                pass
+    def _show_empty_state(self) -> None:
+        if "tree" not in self._ui:
+            return
+        tree = self._ui["tree"]
+        if tree.get_children():
+            return
+        title = _t(self._lang, "empty_title")
+        hint = _t(self._lang, "empty_hint")
+        tree.insert("", "end", values=("", title, hint, "", "", "", "", ""), tags=("empty",))
+
+    def _is_empty_row(self, item_id: str) -> bool:
+        return "empty" in self._ui["tree"].item(item_id, "tags")
 
     def _build_log_panel(self, parent: tk.Frame, row: int) -> None:
         p = _pal()
@@ -998,6 +1152,9 @@ class CtkDiscoveryApp(ctk.CTk):
         self._ui["log_tree"].configure(yscrollcommand=log_vsb.set)
         self._ui["log_tree"].grid(row=0, column=0, sticky="nsew")
         log_vsb.grid(row=0, column=1, sticky="ns")
+        self._ui["log_tree"].tag_configure("log_error", foreground=p["badge_err_fg"])
+        self._ui["log_tree"].tag_configure("log_warn", foreground=p["badge_run_fg"])
+        self._ui["log_tree"].tag_configure("log_ok", foreground=p["badge_done_fg"])
 
     # ── Status bar ────────────────────────────────────────────────────────────
 
@@ -1014,7 +1171,7 @@ class CtkDiscoveryApp(ctk.CTk):
         ]):
             sep = tk.Frame(bar, bg=p["border"], width=1)
             sep.grid(row=0, column=col * 2, padx=0, pady=4, sticky="ns")
-            lbl = tk.Label(bar, textvariable=var, bg=p["sb_bg"], fg=p["muted"],
+            lbl = tk.Label(bar, textvariable=var, bg=p["sb_bg"], fg=p["text2"],
                            font=("Segoe UI", 10), padx=10)
             lbl.grid(row=0, column=col * 2 + 1, sticky="w", pady=4)
 
@@ -1029,12 +1186,12 @@ class CtkDiscoveryApp(ctk.CTk):
         self._state_text.set(_t(self._lang, key))
 
         cfg = {
-            "idle":       (p["badge_idle_fg"], "#FFFFFF", True,  False, False),
-            "running":    (p["badge_run_fg"],  "#FFFFFF", False, True,  False),
-            "cancelling": (p["badge_run_fg"],  "#FFFFFF", False, False, False),
-            "saving":     (p["badge_run_fg"],  "#FFFFFF", False, False, False),
-            "done":       (p["badge_done_fg"], "#FFFFFF", True,  False, True),
-            "error":      (p["badge_err_fg"],  "#FFFFFF", True,  False, False),
+            "idle":       (p["badge_idle"], p["badge_idle_fg"], True,  False, False),
+            "running":    (p["badge_run"],  p["badge_run_fg"],  False, True,  False),
+            "cancelling": (p["badge_run"],  p["badge_run_fg"],  False, False, False),
+            "saving":     (p["badge_save"], p["badge_save_fg"], False, False, False),
+            "done":       (p["badge_done"], p["badge_done_fg"], True,  False, True),
+            "error":      (p["badge_err"],  p["badge_err_fg"],  True,  False, False),
         }
         bg, fg, run_en, stop_en, save_en = cfg.get(key, cfg["idle"])
 
@@ -1048,9 +1205,47 @@ class CtkDiscoveryApp(ctk.CTk):
         if "run_btn"  in self._ui: self._ui["run_btn"].configure(state=run_state)
         if "stop_btn" in self._ui: self._ui["stop_btn"].configure(state=stop_state)
         if "save_btn" in self._ui: self._ui["save_btn"].configure(state=save_state)
+        self._set_scan_inputs_enabled(state not in ("running", "cancelling", "saving"))
 
         if state not in ("running", "cancelling"):
             self._stop_timer()
+
+    def _set_scan_inputs_enabled(self, enabled: bool) -> None:
+        state = "normal" if enabled else "disabled"
+        readonly_state = "readonly" if enabled else "disabled"
+        for key in [
+            "url_box", "output_entry", "browse_btn",
+            "chk_recursive_scan", "chk_include_subdomains",
+            "chk_skip_probe", "chk_verify_ssl",
+            "ent_adv_proxy", "ent_adv_excluded_sub", "ent_adv_js_dir",
+            "hdr_add_btn", "hdr_edit_btn", "hdr_remove_btn", "hdr_import__btn",
+        ]:
+            widget = self._ui.get(key)
+            if widget is not None:
+                try:
+                    widget.configure(state=state)
+                except Exception:
+                    pass
+        for key in [
+            "spin_max_js", "spin_max_depth", "spin_max_workers",
+            "spin_timeout", "spin_request_delay", "spin_recursive_depth",
+        ]:
+            widget = self._ui.get(key)
+            if widget is not None:
+                try:
+                    widget.configure(state=state)
+                except Exception:
+                    pass
+        for key in [
+            "filter_combo_quantity", "filter_combo_url_type",
+            "filter_combo_status_code", "result_combo",
+        ]:
+            widget = self._ui.get(key)
+            if widget is not None:
+                try:
+                    widget.configure(state=readonly_state)
+                except Exception:
+                    pass
 
     # ── Timer ─────────────────────────────────────────────────────────────────
 
@@ -1064,18 +1259,23 @@ class CtkDiscoveryApp(ctk.CTk):
         if self._state not in ("running", "cancelling"):
             return
         elapsed = time.monotonic() - (self._start_time or time.monotonic())
+        rate = self._request_count / elapsed if elapsed > 0 else 0.0
+        self._update_runtime_labels(elapsed=elapsed, rate=rate)
+        self._timer_id = self.after(500, self._tick)
+
+    def _update_runtime_labels(self, elapsed: Optional[float] = None, rate: Optional[float] = None) -> None:
+        elapsed = 0.0 if elapsed is None else max(0.0, elapsed)
         h, rem = divmod(int(elapsed), 3600)
         m, s = divmod(rem, 60)
-        self._elapsed_text.set(f"{h:02d}:{m:02d}:{s:02d}")
-        self._req_text.set(f"Requests: {self._request_count:,}")
-        rate = self._request_count / elapsed if elapsed > 0 else 0.0
-        self._rate_text.set(f"Rate: {rate:.1f} req/s")
-        # status bar
+        display_rate = 0.0 if rate is None else rate
         workers = getattr(self._current_config, "max_workers", 0) if hasattr(self, "_current_config") else 0
-        self._workers_text.set(f"Workers: {workers}")
-        self._sb_rate_text.set(f"Rate: {rate:.1f} req/s")
-        self._errors_text.set(f"Errors: {self._error_count}")
-        self._timer_id = self.after(500, self._tick)
+        self._elapsed_text.set(_t(self._lang, "elapsed", h=h, m=m, s=s))
+        self._req_text.set(_t(self._lang, "req_count", n=f"{self._request_count:,}"))
+        self._rate_text.set(_t(self._lang, "rate_label", r=f"{display_rate:.1f}"))
+        self._workers_text.set(_t(self._lang, "workers_label", n=workers))
+        self._sb_rate_text.set(_t(self._lang, "rate_label", r=f"{display_rate:.1f}"))
+        self._queue_text.set(_t(self._lang, "queue_label", n=0))
+        self._errors_text.set(_t(self._lang, "errors_label", n=self._error_count))
 
     def _stop_timer(self) -> None:
         if self._timer_id:
@@ -1143,13 +1343,19 @@ class CtkDiscoveryApp(ctk.CTk):
             target=self._worker, args=(req, cancel_event), daemon=True)
         self._scan_thread.start()
 
+    def _bump_request_count(self) -> None:
+        self._request_count += 1
+
+    def _bump_error_count(self) -> None:
+        self._error_count += 1
+
     def _worker(self, req: CtkScanRequest, cancel_event: threading.Event) -> None:
         try:
             execution = build_execution_context(req.config)
             execution.cancel_event = cancel_event
 
             def on_progress(msg: str) -> None:
-                self._request_count += 1
+                self.after(0, self._bump_request_count)
                 self.after(0, lambda m=msg: self._log(m))
 
             result = discover_many(req.config, req.urls,
@@ -1160,7 +1366,7 @@ class CtkDiscoveryApp(ctk.CTk):
         except ScanCancelled:
             self.after(0, self._on_cancelled)
         except Exception as exc:
-            self._error_count += 1
+            self.after(0, self._bump_error_count)
             self.after(0, lambda m=str(exc): self._on_error(m))
 
     def _on_finished(self, batch: dict) -> None:
@@ -1201,7 +1407,10 @@ class CtkDiscoveryApp(ctk.CTk):
         path = filedialog.asksaveasfilename(
             title=_t(self._lang, "save_title"),
             defaultextension=".xlsx",
-            filetypes=[("Excel/HTML", "*.xlsx *.html"), ("All files", "*")],
+            filetypes=[
+                (_t(self._lang, "filetype_excel_html"), "*.xlsx *.html"),
+                (_t(self._lang, "filetype_all"), "*"),
+            ],
             parent=self,
         )
         if not path:
@@ -1251,26 +1460,79 @@ class CtkDiscoveryApp(ctk.CTk):
         self._apply_filter()
         self._update_metrics_from_record(rec)
 
+    def _api_items(self, record: dict) -> List[dict]:
+        items: List[dict] = []
+        seen: set[str] = set()
+        for key, accessible_default in (
+            ("all_apis", None),
+            ("accessible_apis", True),
+            ("probe_results", None),
+        ):
+            for item in record.get(key) or []:
+                if not isinstance(item, dict):
+                    continue
+                identity = str(item.get("url") or item.get("path") or item.get("endpoint") or "")
+                if not identity:
+                    identity = repr(sorted(item.items()))
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                normalized = dict(item)
+                if accessible_default is not None and "accessible" not in normalized:
+                    normalized["accessible"] = accessible_default
+                items.append(normalized)
+        return items
+
+    def _source_text(self, item: dict) -> str:
+        sources = item.get("sources")
+        if isinstance(sources, (list, tuple, set)):
+            return ", ".join(str(source) for source in sources)
+        if sources:
+            return str(sources)
+        return str(item.get("source") or "")
+
+    def _page_items(self, record: dict) -> List[dict]:
+        items: List[dict] = []
+        seen: set[str] = set()
+        for key, accessible_default in (
+            ("all_pages", None),
+            ("accessible_pages", True),
+        ):
+            for item in record.get(key) or []:
+                if not isinstance(item, dict):
+                    continue
+                identity = str(item.get("url") or item.get("path") or "")
+                if not identity:
+                    identity = repr(sorted(item.items()))
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                normalized = dict(item)
+                if accessible_default is not None and "accessible" not in normalized:
+                    normalized["accessible"] = accessible_default
+                items.append(normalized)
+        return items
+
     def _build_rows(self, record: dict) -> List[dict]:
         rows: List[dict] = []
-        for item in record.get("probe_results") or []:
+        for item in self._api_items(record):
             rows.append({
                 "kind":      "api",
-                "method":    str(item.get("method") or ""),
-                "endpoint":  str(item.get("path") or item.get("url") or ""),
-                "source":    str(item.get("source") or ""),
-                "status":    str(item.get("status_code") or "-"),
-                "params":    str(item.get("parameters") or ""),
+                "method":    str(item.get("method") or item.get("probe_method") or ""),
+                "endpoint":  str(item.get("path") or item.get("endpoint") or item.get("url") or ""),
+                "source":    self._source_text(item),
+                "status":    str(item.get("status_code") or item.get("status") or "-"),
+                "params":    str(item.get("parameters") or item.get("length") or ""),
                 "sensitive": "",
                 "severity":  "",
                 "ctype":     str(item.get("content_type") or ""),
             })
-        for item in record.get("all_pages") or record.get("accessible_pages") or []:
+        for item in self._page_items(record):
             rows.append({
                 "kind":      "page",
                 "method":    "PAGE",
                 "endpoint":  str(item.get("path") or item.get("url") or ""),
-                "source":    ", ".join(item.get("sources", []) or []),
+                "source":    self._source_text(item),
                 "status":    str(item.get("status_code") or "-"),
                 "params":    str(item.get("length") or ""),
                 "sensitive": "",
@@ -1299,7 +1561,7 @@ class CtkDiscoveryApp(ctk.CTk):
                 "params":    "",
                 "sensitive": str(f.get("type") or f.get("category") or ""),
                 "severity":  str(f.get("severity") or ""),
-                "ctype":     str(f.get("masked_value") or f.get("value") or ""),
+                "ctype":     str(f.get("value") or f.get("masked_value") or ""),
             })
         return rows
 
@@ -1309,6 +1571,19 @@ class CtkDiscoveryApp(ctk.CTk):
         for i, r in enumerate(rows):
             method = r["method"].upper()
             tags = [f"m_{method}"] if method in ("GET","POST","PUT","PATCH","DELETE","HEAD") else []
+            if method in ("JS", "PAGE"):
+                tags.append(f"m_{method}")
+            if r.get("kind") == "sensitive":
+                tags.append("sensitive_row")
+            status_parts = str(r.get("status") or "").split()
+            try:
+                status_num = int(status_parts[0]) if status_parts else 0
+            except ValueError:
+                status_num = 0
+            if status_num >= 500:
+                tags.append("status_error")
+            elif status_num >= 400:
+                tags.append("status_warn")
             if i % 2:
                 tags.append("alt")
             tree.insert("", "end",
@@ -1317,6 +1592,8 @@ class CtkDiscoveryApp(ctk.CTk):
                         r["severity"], r["ctype"]),
                 tags=tags,
             )
+        if not rows:
+            self._show_empty_state()
         # Update dissimilar count
         if "dissimilar_lbl" in self._ui:
             self._ui["dissimilar_lbl"].configure(
@@ -1328,6 +1605,7 @@ class CtkDiscoveryApp(ctk.CTk):
 
     def _apply_filter(self) -> None:
         q = self._filter_var.get().lower()
+        quantity_f = self._qty_var.get()
         method_f = self._type_var.get()
         status_f = self._status_var.get()
         all_v = _t(self._lang, "all")
@@ -1340,11 +1618,17 @@ class CtkDiscoveryApp(ctk.CTk):
         }.get(selected_tab)
         rows = [
             r for r in self._all_rows
-            if (not q or q in (r["endpoint"] + r["source"] + r["ctype"]).lower())
+            if (not q or q in (r["method"] + r["endpoint"] + r["source"] + r["status"] +
+                               r["params"] + r["sensitive"] + r["severity"] + r["ctype"]).lower())
             and (tab_kind is None or r.get("kind") == tab_kind)
             and (method_f == all_v or r["method"].upper() == method_f)
             and (status_f == all_v or r["status"] == status_f)
         ]
+        if quantity_f != all_v:
+            try:
+                rows = rows[:int(quantity_f)]
+            except ValueError:
+                pass
         self._refresh_table(rows)
 
     def _on_reset_filter(self) -> None:
@@ -1387,6 +1671,8 @@ class CtkDiscoveryApp(ctk.CTk):
         row_id = self._ui["tree"].identify_row(event.y)
         if not row_id:
             return
+        if self._is_empty_row(row_id):
+            return
         col_idx = int(col_id.replace("#", "")) - 1
         vals = self._ui["tree"].item(row_id, "values")
         if col_idx < len(vals):
@@ -1397,18 +1683,20 @@ class CtkDiscoveryApp(ctk.CTk):
         dlg = ctk.CTkToplevel(self)
         dlg.title(_t(self._lang, "cell_detail"))
         dlg.geometry("620x300")
+        self._configure_dialog(dlg, p)
         dlg.grab_set()
         tb = ctk.CTkTextbox(dlg, font=ctk.CTkFont(family="Segoe UI", size=12),
-                             fg_color=p["surface2"])
+                             fg_color=p["field_bg"], border_color=p["field_border"],
+                             border_width=1, text_color=p["text"])
         tb.pack(fill="both", expand=True, padx=12, pady=(12, 6))
         tb.insert("0.0", text)
         bf = tk.Frame(dlg, bg=p["surface"])
         bf.pack(fill="x", padx=12, pady=(0, 12))
-        ctk.CTkButton(bf, text=_t(self._lang, "copy"), width=76,
-                       command=lambda: (self.clipboard_clear(), self.clipboard_append(text))
-                       ).pack(side="right", padx=(6, 0))
-        ctk.CTkButton(bf, text=_t(self._lang, "close"), width=76,
-                       command=dlg.destroy).pack(side="right")
+        self._dialog_button(
+            bf, _t(self._lang, "copy"),
+            lambda: (self.clipboard_clear(), self.clipboard_append(text)),
+        ).pack(side="right", padx=(6, 0))
+        self._dialog_button(bf, _t(self._lang, "close"), dlg.destroy).pack(side="right")
 
     # ── Metrics ───────────────────────────────────────────────────────────────
 
@@ -1416,24 +1704,36 @@ class CtkDiscoveryApp(ctk.CTk):
         for attr in ("_mv_summary","_mv_sensitive","_mv_js","_mv_pages","_mv_apis"):
             getattr(self, attr).configure(text="0")
 
+    def _summary_count(self, summary: dict, key: str, fallback: int) -> int:
+        try:
+            value = int(summary.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        return value or fallback
+
     def _update_metrics(self, batch: dict) -> None:
         s = batch.get("summary") or {}
         records = batch.get("results") or []
         self._mv_summary.configure(text=f"{len(records):,}")
         sensitive_total = s.get("sensitive_total", s.get("hardcoded_total", 0))
+        js_total = self._summary_count(s, "js_fetched", sum(len(r.get("js_files") or []) for r in records))
+        page_total = self._summary_count(s, "page_count", sum(len(self._page_items(r)) for r in records))
+        api_total = self._summary_count(s, "api_count", sum(len(self._api_items(r)) for r in records))
         self._mv_sensitive.configure(text=f"{sensitive_total:,}")
-        self._mv_js.configure(text=f"{s.get('js_fetched', 0):,}")
-        self._mv_pages.configure(text=f"{s.get('page_count', 0):,}")
-        self._mv_apis.configure(text=f"{s.get('api_count', 0):,}")
+        self._mv_js.configure(text=f"{js_total:,}")
+        self._mv_pages.configure(text=f"{page_total:,}")
+        self._mv_apis.configure(text=f"{api_total:,}")
 
     def _update_metrics_from_record(self, rec: dict) -> None:
         s = rec.get("summary") or {}
-        probes = rec.get("probe_results") or []
-        self._mv_summary.configure(text=f"{len(probes):,}")
+        js_total = self._summary_count(s, "js_fetched", len(rec.get("js_files") or []))
+        page_total = self._summary_count(s, "page_count", len(self._page_items(rec)))
+        api_total = self._summary_count(s, "api_count", len(self._api_items(rec)))
+        self._mv_summary.configure(text=f"{len(self._all_rows):,}")
         self._mv_sensitive.configure(text=f"{len(resolve_sensitive_findings(rec)):,}")
-        self._mv_js.configure(text=f"{s.get('js_fetched', 0):,}")
-        self._mv_pages.configure(text=f"{s.get('page_count', 0):,}")
-        self._mv_apis.configure(text=f"{s.get('api_count', 0):,}")
+        self._mv_js.configure(text=f"{js_total:,}")
+        self._mv_pages.configure(text=f"{page_total:,}")
+        self._mv_apis.configure(text=f"{api_total:,}")
 
     # ── Log ───────────────────────────────────────────────────────────────────
 
@@ -1441,7 +1741,15 @@ class CtkDiscoveryApp(ctk.CTk):
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
         self._log_lines.append(f"{ts}\t{message}")
         tree = self._ui["log_tree"]
-        tree.insert("", "end", values=(ts, message))
+        lower = message.lower()
+        tags = []
+        if "오류" in message or "error" in lower or "failed" in lower or "실패" in message:
+            tags.append("log_error")
+        elif "경고" in message or "warning" in lower or "중지" in message or "stop" in lower:
+            tags.append("log_warn")
+        elif "완료" in message or "saved" in lower or "저장 완료" in message:
+            tags.append("log_ok")
+        tree.insert("", "end", values=(ts, message), tags=tags)
         children = tree.get_children()
         if children:
             tree.see(children[-1])
@@ -1455,14 +1763,21 @@ class CtkDiscoveryApp(ctk.CTk):
         path = filedialog.asksaveasfilename(
             title=_t(self._lang, "save_log_title"),
             defaultextension=".log",
-            filetypes=[("Log files", "*.log *.txt"), ("All files", "*")],
+            filetypes=[
+                (_t(self._lang, "filetype_log"), "*.log *.txt"),
+                (_t(self._lang, "filetype_all"), "*"),
+            ],
             parent=self,
         )
         if path:
             try:
                 Path(path).write_text("\n".join(self._log_lines), encoding="utf-8")
             except Exception as exc:
-                messagebox.showerror("", str(exc), parent=self)
+                messagebox.showerror(
+                    _t(self._lang, "save_log_error_title"),
+                    _t(self._lang, "err_prefix", msg=str(exc)),
+                    parent=self,
+                )
 
     # ── Headers ───────────────────────────────────────────────────────────────
 
@@ -1484,32 +1799,38 @@ class CtkDiscoveryApp(ctk.CTk):
         dlg = ctk.CTkToplevel(self)
         dlg.title(_t(self._lang, "import_"))
         dlg.geometry("380x220")
+        self._configure_dialog(dlg, p)
         dlg.grab_set()
         tk.Label(dlg, text=_t(self._lang, "import_hint"),
-                 bg=p["surface"], fg=p["muted"],
+                 bg=p["surface"], fg=p["text2"],
                  font=("Segoe UI", 10)).pack(anchor="w", padx=12, pady=(10, 4))
-        tb = ctk.CTkTextbox(dlg, font=ctk.CTkFont(size=11))
+        tb = ctk.CTkTextbox(dlg, font=ctk.CTkFont(size=11),
+                             fg_color=p["field_bg"], border_color=p["field_border"],
+                             border_width=1, text_color=p["text"])
         tb.pack(fill="both", expand=True, padx=12, pady=4)
         def apply():
             for k, v in parse_header_lines(tb.get("0.0", "end")).items():
                 self._headers[k] = v
                 self._ui["hdr_tree"].insert("", "end", values=(k, v))
             dlg.destroy()
-        ctk.CTkButton(dlg, text="OK", command=apply).pack(pady=(4, 10))
+        self._dialog_button(dlg, "OK", apply).pack(pady=(4, 10))
 
     def _hdr_dialog(self, edit_name: Optional[str]) -> None:
         p = _pal()
         dlg = ctk.CTkToplevel(self)
         dlg.title(_t(self._lang, "header_edit_title"))
         dlg.geometry("340x170")
+        self._configure_dialog(dlg, p)
         dlg.grab_set()
         nv = tk.StringVar(value=edit_name or "")
         vv = tk.StringVar(value=self._headers.get(edit_name or "", ""))
         for key_label, var in [(_t(self._lang, "col_name"), nv),
                                 (_t(self._lang, "col_value"), vv)]:
-            tk.Label(dlg, text=key_label, bg=p["surface"], fg=p["muted"],
+            tk.Label(dlg, text=key_label, bg=p["surface"], fg=p["text2"],
                      font=("Segoe UI", 10)).pack(anchor="w", padx=12, pady=(8, 0))
-            ctk.CTkEntry(dlg, textvariable=var, font=ctk.CTkFont(size=12)
+            ctk.CTkEntry(dlg, textvariable=var, font=ctk.CTkFont(size=12),
+                         fg_color=p["field_bg"], border_color=p["field_border"],
+                         text_color=p["text"]
                          ).pack(fill="x", padx=12)
         def apply():
             n, v = nv.get().strip(), vv.get().strip()
@@ -1526,7 +1847,7 @@ class CtkDiscoveryApp(ctk.CTk):
                     dlg.destroy(); return
             self._ui["hdr_tree"].insert("", "end", values=(n, v))
             dlg.destroy()
-        ctk.CTkButton(dlg, text="OK", command=apply).pack(pady=(10, 12))
+        self._dialog_button(dlg, "OK", apply).pack(pady=(10, 12))
 
     def _on_browse(self) -> None:
         p = filedialog.asksaveasfilename(
@@ -1539,109 +1860,68 @@ class CtkDiscoveryApp(ctk.CTk):
             self._ui["output_entry"].delete(0, "end")
             self._ui["output_entry"].insert(0, p)
 
-    # ── Language & theme ──────────────────────────────────────────────────────
+    # ── Language ──────────────────────────────────────────────────────────────
 
     def _on_lang_changed(self, choice: str) -> None:
+        tab_keys = {
+            _t(self._lang, "tab_apis"): "tab_apis",
+            _t(self._lang, "tab_pages"): "tab_pages",
+            _t(self._lang, "tab_js"): "tab_js",
+            _t(self._lang, "tab_sensitive"): "tab_sensitive",
+            _t(self._lang, "tab_responses"): "tab_responses",
+        }
+        selected_tab_key = tab_keys.get(self._tab_var.get(), "tab_apis")
+        all_values = {"전체", "All"}
+        filter_was_all = {
+            "quantity": self._qty_var.get() in all_values,
+            "url_type": self._type_var.get() in all_values,
+            "status_code": self._status_var.get() in all_values,
+        }
         self._lang = "en" if choice == "English" else "ko"
         self._refresh_all_texts()
-
-    def _on_toggle_dark(self) -> None:
-        prev_pal = _pal()                               # palette BEFORE switch
-        mode = "Dark" if self._ui["dark_switch"].get() else "Light"
-        ctk.set_appearance_mode(mode)
-        new_pal = _pal()                                # palette AFTER switch
-        self._repaint_tk_widgets(prev_pal, new_pal)
-
-    # ── Theme repaint ──────────────────────────────────────────────────────────
-
-    def _repaint_tk_widgets(self, old_p: dict, new_p: dict) -> None:
-        """Recursively update all native tk.* widget colors after a theme switch."""
-
-        def _norm(color: str) -> str:
+        selected_tab = _t(self._lang, selected_tab_key)
+        self._tab_var.set(selected_tab)
+        if "tab_selector" in self._ui:
             try:
-                r, g, b = self.winfo_rgb(color)
-                return f"#{r >> 8:02x}{g >> 8:02x}{b >> 8:02x}"
+                self._ui["tab_selector"].set(selected_tab)
             except Exception:
-                return color.lower()
-
-        # Build reverse mapping: normalised-old-hex → new-hex
-        old_to_new: Dict[str, str] = {}
-        for key, old_val in old_p.items():
-            if key in new_p:
-                old_to_new[_norm(old_val)] = new_p[key]
-
-        def _walk(widget: tk.Widget) -> None:
-            cls = type(widget).__name__
-
-            if cls == "Frame":
-                try:
-                    bg = _norm(widget.cget("bg"))
-                    if bg in old_to_new:
-                        widget.configure(bg=old_to_new[bg])
-                except Exception:
-                    pass
-                try:
-                    hbg = _norm(widget.cget("highlightbackground"))
-                    if hbg in old_to_new:
-                        widget.configure(highlightbackground=old_to_new[hbg])
-                except Exception:
-                    pass
-
-            elif cls == "Label":
-                try:
-                    kw: Dict[str, str] = {}
-                    bg = _norm(widget.cget("bg"))
-                    fg = _norm(widget.cget("fg"))
-                    if bg in old_to_new:
-                        kw["bg"] = old_to_new[bg]
-                    if fg in old_to_new:
-                        kw["fg"] = old_to_new[fg]
-                    if kw:
-                        widget.configure(**kw)
-                except Exception:
-                    pass
-
-            elif cls == "Spinbox":
-                p = new_p
-                try:
-                    widget.configure(
-                        bg=p["surface2"], fg=p["text"],
-                        highlightbackground=p["border"],
-                        buttonbackground=p["border2"],
-                        insertbackground=p["text"],
-                        disabledbackground=p["surface2"],
-                    )
-                except Exception:
-                    pass
-
-            for child in widget.winfo_children():
-                _walk(child)
-
-        # Update main window bg
-        try:
-            self.configure(bg=new_p["window"])
-        except Exception:
-            pass
-
-        for child in self.winfo_children():
-            _walk(child)
-            # also walk children of CTK wrapper frames
-            for sub in child.winfo_children():
-                _walk(sub)
-
-        # Treeview styles & tags
-        _style_treeview()
-        p = new_p
-        for method, ck in [
-            ("GET", "method_get"), ("POST", "method_post"),
-            ("PUT", "method_put"), ("PATCH", "method_patch"),
-            ("DELETE", "method_del"), ("HEAD", "method_head"),
+                pass
+        all_label = _t(self._lang, "all")
+        for key, var in [
+            ("quantity", self._qty_var),
+            ("url_type", self._type_var),
+            ("status_code", self._status_var),
         ]:
-            self._ui["tree"].tag_configure(f"m_{method}", foreground=p[ck])
-        self._ui["tree"].tag_configure("alt", background=p["row_alt"])
+            if filter_was_all[key]:
+                var.set(all_label)
+                combo = self._ui.get(f"filter_combo_{key}")
+                if combo is not None:
+                    try:
+                        combo.set(all_label)
+                    except Exception:
+                        pass
+        self._apply_filter()
 
-        # State badge
-        self._set_state(self._state)
+    def _repaint_tree_widgets(self, p: dict) -> None:
+        """Refresh ttk Treeview styles and per-row tags for the active theme."""
+        _style_treeview()
+        if "tree" in self._ui:
+            for method, ck in [
+                ("GET", "method_get"), ("POST", "method_post"),
+                ("PUT", "method_put"), ("PATCH", "method_patch"),
+                ("DELETE", "method_del"), ("HEAD", "method_head"),
+                ("JS", "m_js"), ("PAGE", "m_pages"),
+            ]:
+                self._ui["tree"].tag_configure(f"m_{method}", foreground=p[ck])
+            self._ui["tree"].tag_configure("alt", background=p["table_row_alt"])
+            self._ui["tree"].tag_configure("empty", foreground=p["text2"], background=p["field_bg"])
+            self._ui["tree"].tag_configure("sensitive_row", foreground=p["m_sensitive"])
+            self._ui["tree"].tag_configure("status_error", foreground=p["badge_err_fg"])
+            self._ui["tree"].tag_configure("status_warn", foreground=p["method_put"])
+        if "log_tree" in self._ui:
+            self._ui["log_tree"].tag_configure("log_error", foreground=p["badge_err_fg"])
+            self._ui["log_tree"].tag_configure("log_warn", foreground=p["badge_run_fg"])
+            self._ui["log_tree"].tag_configure("log_ok", foreground=p["badge_done_fg"])
 
     def _refresh_all_texts(self) -> None:
         self.title(_t(self._lang, "window_title"))
@@ -1649,6 +1929,7 @@ class CtkDiscoveryApp(ctk.CTk):
         mapping = {
             "subtitle":        "app_subtitle",
             "exec_lbl":        "exec_status",
+            "url_help_lbl":     "url_help",
             "results_lbl":     "results",
             "sel_lbl":         "result_selector",
             "log_lbl":         "log",
@@ -1694,21 +1975,35 @@ class CtkDiscoveryApp(ctk.CTk):
                 self._ui[wkey].configure(text=title)
 
         if "tab_selector" in self._ui:
-            tab_values = [
-                _t(self._lang, "tab_apis"),
-                _t(self._lang, "tab_pages"),
-                _t(self._lang, "tab_js"),
-                _t(self._lang, "tab_sensitive"),
-                _t(self._lang, "tab_responses"),
-            ]
+            tab_values = self._tab_values()
             self._ui["tab_selector"].configure(values=tab_values)
             if self._tab_var.get() not in tab_values:
                 self._tab_var.set(tab_values[0])
+
+        all_lbl = _t(self._lang, "all")
+        filter_values = {
+            "quantity": [all_lbl, "25", "50", "100", "500"],
+            "url_type": [all_lbl, "GET", "POST", "PUT", "DELETE", "HEAD"],
+            "status_code": [all_lbl, "200", "201", "301", "302", "400", "401", "403", "404", "500"],
+        }
+        for key, values in filter_values.items():
+            combo = self._ui.get(f"filter_combo_{key}")
+            if combo is not None:
+                try:
+                    combo.configure(values=values)
+                except Exception:
+                    pass
 
         # Tree headings
         if "tree" in self._ui:
             for col in self._COLS:
                 self._ui["tree"].heading(col, text=_t(self._lang, f"col_{col}"))
+            children = self._ui["tree"].get_children()
+            if len(children) == 1 and self._is_empty_row(children[0]):
+                self._ui["tree"].item(children[0], values=(
+                    "", _t(self._lang, "empty_title"), _t(self._lang, "empty_hint"),
+                    "", "", "", "", "",
+                ))
         if "log_tree" in self._ui:
             self._ui["log_tree"].heading("ts",  text=_t(self._lang, "col_ts"))
             self._ui["log_tree"].heading("msg", text=_t(self._lang, "col_msg"))
@@ -1739,20 +2034,33 @@ class CtkDiscoveryApp(ctk.CTk):
                 try: self._ui[wkey].configure(text=_t(self._lang, key))
                 except Exception: pass
 
-        # Language toggle text
-        if "dark_switch" in self._ui:
-            self._ui["dark_switch"].configure(text=_t(self._lang, "dark_mode"))
+        # Language selector text
         if "lang_lbl" in self._ui:
             self._ui["lang_lbl"].configure(text=_t(self._lang, "language"))
 
         # State text
         if self._state:
             self._state_text.set(_t(self._lang, self._state))
+        self._update_runtime_labels()
 
     # ── Close ─────────────────────────────────────────────────────────────────
 
-    def protocol(self, name, func=None):  # type: ignore[override]
-        return super().protocol(name, func)
+    def _on_closing(self) -> None:
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+        if self._timer_id is not None:
+            try:
+                self.after_cancel(self._timer_id)
+            except Exception:
+                pass
+            self._timer_id = None
+        thread = self._scan_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

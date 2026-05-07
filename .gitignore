@@ -14,6 +14,7 @@
 !/app.py
 !/route_api_discovery.py
 !/route_api_discovery_ctk.py
+!/route_api_discovery_qt.py
 !/GUI/
 !/GUI/__init__.py
 !/GUI/launcher.py
@@ -21,6 +22,8 @@
 # Unit tests.
 !/tests/
 !/tests/*.py
+!/tests/fixtures/
+!/tests/fixtures/**
 
 # Generated files, local environments, and sample scan outputs stay ignored.
 __pycache__/
@@ -55,6 +58,8 @@ __pycache__/
 /mycsat.*
 *.xlsx
 *.html
+!/tests/fixtures/
+!/tests/fixtures/**
 
 # Temporary / OS files
 *.tmp

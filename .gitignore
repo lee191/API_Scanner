@@ -4,6 +4,7 @@
 # Repository metadata and documentation.
 !/.gitignore
 !/README.md
+!/README.en.md
 !/LICENSE
 !/.github/
 !/.github/workflows/

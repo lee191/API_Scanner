@@ -223,7 +223,7 @@ class OutputValidationTests(unittest.TestCase):
             with zipfile.ZipFile(saved_path) as workbook:
                 self.assertIn("[Content_Types].xml", workbook.namelist())
                 self.assertIn("xl/workbook.xml", workbook.namelist())
-                sensitive_xml = workbook.read("xl/worksheets/sheet5.xml").decode("utf-8")
+                sensitive_xml = workbook.read("xl/worksheets/sheet6.xml").decode("utf-8")
                 self.assertIn("admin@company.co.kr", sensitive_xml)
                 self.assertIn("<cols>", sensitive_xml)
         finally:

@@ -9,6 +9,7 @@ import hashlib
 from html import escape as html_escape
 import ipaddress
 import json
+import math
 import re
 import socket
 import sys
@@ -17,14 +18,14 @@ import time
 import traceback
 import zipfile
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Deque, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 import ssl
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
-from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener, urlopen
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 from xml.sax.saxutils import escape as xml_escape
 
 
@@ -137,8 +138,11 @@ HARD_CODED_EMAIL_RE = re.compile(
     r"(?<![\w.+-])(?P<value>[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,24})(?![\w.-])"
 )
 HARD_CODED_PHONE_RE = re.compile(
-    r"(?<![\w@])(?P<value>(?:\+82[-.\s]?)?0?(?:10|11|16|17|18|19|2|31|32|33|41|42|43|44|51|52|53|54|55|61|62|63|64|70)"
-    r"(?:[-.\s]?\d{3,4})[-.\s]?\d{4}|(?:\+|00)\d{1,3}(?:[-.\s]?\(?\d{1,4}\)?){2,5})(?!\w)"
+    r"(?<![\w@])(?P<value>(?:(?:\+82|0082)[-.\s]?)?0?1[016789](?:[-.\s]?\d{3,4})[-.\s]?\d{4})(?!\w)"
+)
+HARD_CODED_PHONE_CONTEXT_RE = re.compile(
+    r"(?<![a-z])(?:phone|mobile|cell(?:phone)?|telephone|tel|contact|call|sms)(?![a-z])",
+    re.IGNORECASE,
 )
 HARD_CODED_KEY_VALUE_RE = re.compile(
     r"""(?:(?P<kq>["'`])(?P<quoted_key>[A-Za-z_][A-Za-z0-9_.-]*)(?P=kq)|(?P<bare_key>[A-Za-z_][A-Za-z0-9_]*))\s*[:=]\s*(?P<vq>["'`])(?P<value>[^"'`\r\n]{0,512}?)(?P=vq)""",
@@ -171,7 +175,11 @@ HARD_CODED_SECRET_VALUE_PATTERNS = (
     ),
     (
         "private_key",
-        re.compile(r"(?P<value>-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----)"),
+        re.compile(r"(?P<value>-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----)"),
+    ),
+    (
+        "openssh_private_key",
+        re.compile(r"(?P<value>-----BEGIN OPENSSH PRIVATE KEY-----[\s\S]{32,}?-----END OPENSSH PRIVATE KEY-----)"),
     ),
     (
         "twilio_account_sid",
@@ -229,6 +237,7 @@ HARD_CODED_PLACEHOLDER_VALUES = {
     "changeme",
     "your_password",
     "password",
+    "pass",
     "000000",
     "00000000",
     "0000000000",
@@ -240,6 +249,17 @@ HARD_CODED_PLACEHOLDER_VALUES = {
     "redacted",
     "hidden",
     "masked",
+    "true",
+    "false",
+    "null",
+    "none",
+    "undefined",
+    "yes",
+    "no",
+    "on",
+    "off",
+    "success",
+    "error",
     "<hidden>",
     "<redacted>",
     "[hidden]",
@@ -305,15 +325,73 @@ HARD_CODED_TOKEN_KEYS = {
     "slacktoken",
     "googleapikey",
     "privatekey",
+    "pemkey",
+    "secretkey",
+    "encryptionkey",
+    "encryptionsecret",
+    "encryptkey",
+    "decryptkey",
+    "cryptokey",
+    "cipherkey",
+    "signingkey",
+    "signaturekey",
+    "verificationkey",
+    "aeskey",
+    "rsakey",
+    "ecprivatekey",
+    "hmacsecret",
+    "hmackey",
+    "webhooksecret",
+    "jwtsecret",
+    "oauthsecret",
+    "appsecret",
+    "consumersecret",
+    "accesskey",
 }
 HARD_CODED_EMAIL_KEYS = {"email", "loginemail", "contactemail"}
-HARD_CODED_PHONE_KEYS = {"phone", "mobile", "tel", "telephone", "contactphone"}
+HARD_CODED_PHONE_KEYS = {
+    "phone",
+    "phonenumber",
+    "phoneno",
+    "mobile",
+    "mobileno",
+    "mobilenumber",
+    "mobilephone",
+    "cell",
+    "cellphone",
+    "tel",
+    "telno",
+    "telephone",
+    "telephonenumber",
+    "contactphone",
+    "contactnumber",
+    "contacttel",
+    "handphone",
+    "hp",
+}
 HARD_CODED_PII_CATEGORIES = {"email", "phone", "person_name", "account_id", "user_id"}
 HARD_CODED_SECRET_CATEGORIES = {"credential", "token"}
 HARD_CODED_ALL_CATEGORIES = ("email", "phone", "person_name", "account_id", "user_id", "credential", "token")
 HARD_CODED_SEVERITY_LEVELS = ("critical", "high", "medium", "low")
 HARD_CODED_LINE_CONTEXT_RADIUS = 60
-HARD_CODED_PHONE_CONTEXT_HINTS = ("phone", "mobile", "tel", "contact", "call")
+HARD_CODED_PHONE_FIELD_SUFFIXES = (
+    "phone",
+    "phonenumber",
+    "phoneno",
+    "mobile",
+    "mobileno",
+    "mobilenumber",
+    "mobilephone",
+    "cellphone",
+    "telephone",
+    "telephonenumber",
+    "telno",
+    "contactphone",
+    "contactnumber",
+    "contacttel",
+    "handphone",
+)
+HARD_CODED_PHONE_CONTEXT_HINTS = ("휴대폰", "핸드폰", "휴대전화", "전화번호", "전화", "연락처", "연락", "문자")
 
 ProgressCallback = Optional[Callable[[str], None]]
 CANCEL_MESSAGE = "사용자 요청으로 스캔을 중지했습니다."
@@ -341,6 +419,15 @@ class Config:
     verify_ssl: bool = True
     proxy_url: str = ""
     js_output_dir: Optional[Path] = None
+    dynamic_analysis: bool = False
+    dynamic_wait: float = 3.0
+    dynamic_max_events: int = 300
+    dynamic_collect_script_bodies: bool = True
+    dynamic_script_body_limit: int = 1_048_576
+    dynamic_action_scan: bool = False
+    dynamic_action_limit: int = 12
+    dynamic_scroll_steps: int = 3
+    dynamic_recursive_limit: int = 50
 
 
 @dataclass
@@ -386,6 +473,7 @@ class FetchResult:
     length: int
     error: Optional[str] = None
     content_type: Optional[str] = None
+    final_url: Optional[str] = None
 
 
 @dataclass
@@ -432,6 +520,7 @@ class RecursiveDiscoveryState:
     skipped_page_duplicates: int = 0
     skipped_api_duplicates: int = 0
     skipped_target_duplicates: int = 0
+    skipped_dynamic_recursive_limit: int = 0
 
 
 class ScriptHtmlParser:
@@ -482,6 +571,25 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--request-delay", type=float, default=0.0, help="요청 시작 간 최소 딜레이(초, 기본값: 0)")
     parser.add_argument("--proxy", type=str, default="", help="프록시 URL(http://host:port 또는 https://host:port)")
     parser.add_argument("--save-js-dir", type=Path, default=None, help="가져온 JS 파일 본문을 저장할 디렉터리")
+    parser.add_argument("--dynamic-analysis", action="store_true", help="실제 브라우저로 페이지를 열어 요청/화면/DOM에서 후보를 더 찾습니다.")
+    parser.add_argument("--dynamic-wait", type=float, default=3.0, help="브라우저에서 페이지가 열린 뒤 추가로 기다릴 시간(초, 기본값: 3)")
+    parser.add_argument("--dynamic-max-events", type=int, default=300, help="브라우저에서 관찰한 요청 중 결과에 저장할 최대 개수(기본값: 300)")
+    parser.add_argument(
+        "--dynamic-collect-script-bodies",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="브라우저가 받은 JavaScript 파일 내용을 직접 읽어 후보를 찾습니다(기본값: 사용).",
+    )
+    parser.add_argument("--dynamic-script-body-limit", type=int, default=1_048_576, help="브라우저가 받은 JavaScript 파일을 읽을 최대 크기(byte, 기본값: 1048576)")
+    parser.add_argument(
+        "--dynamic-actions",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="브라우저에서 스크롤하고 제한된 링크/버튼/탭을 눌러봅니다(기본값: 미사용, 허가된 대상에서만 사용).",
+    )
+    parser.add_argument("--dynamic-action-limit", type=int, default=12, help="브라우저에서 눌러볼 링크/버튼/탭 최대 개수(기본값: 12)")
+    parser.add_argument("--dynamic-scroll-steps", type=int, default=3, help="브라우저에서 아래로 스크롤할 횟수(기본값: 3)")
+    parser.add_argument("--dynamic-recursive-limit", type=int, default=50, help="브라우저 분석으로 찾은 페이지 중 추가 방문할 최대 개수(기본값: 50)")
     parser.add_argument("--no-verify-ssl", action="store_true", help="SSL 인증서 검증을 건너뜁니다(자체 서명 인증서 허용).")
     parser.add_argument("--debug", action="store_true", help="오류 발생 시 traceback을 함께 출력합니다.")
 
@@ -508,6 +616,15 @@ def build_config(args: argparse.Namespace) -> Config:
         verify_ssl=not args.no_verify_ssl,
         proxy_url=str(args.proxy or "").strip(),
         js_output_dir=args.save_js_dir,
+        dynamic_analysis=bool(args.dynamic_analysis),
+        dynamic_wait=max(0.0, args.dynamic_wait),
+        dynamic_max_events=max(1, args.dynamic_max_events),
+        dynamic_collect_script_bodies=bool(args.dynamic_collect_script_bodies),
+        dynamic_script_body_limit=max(0, args.dynamic_script_body_limit),
+        dynamic_action_scan=bool(args.dynamic_actions),
+        dynamic_action_limit=max(0, args.dynamic_action_limit),
+        dynamic_scroll_steps=max(0, args.dynamic_scroll_steps),
+        dynamic_recursive_limit=max(0, args.dynamic_recursive_limit),
     )
     validate_config(config)
     return config
@@ -524,6 +641,18 @@ def validate_config(config: Config) -> None:
         raise ValueError("동시 요청 수는 32 이하로 설정해 주세요.")
     if config.request_delay < 0:
         raise ValueError("요청 딜레이는 0 이상이어야 합니다.")
+    if config.dynamic_wait < 0:
+        raise ValueError("동적 분석 대기 시간은 0 이상이어야 합니다.")
+    if config.dynamic_max_events < 1:
+        raise ValueError("동적 분석 이벤트 수는 1 이상이어야 합니다.")
+    if config.dynamic_script_body_limit < 0:
+        raise ValueError("동적 JavaScript 본문 분석 제한은 0 이상이어야 합니다.")
+    if config.dynamic_action_limit < 0:
+        raise ValueError("동적 액션 수는 0 이상이어야 합니다.")
+    if config.dynamic_scroll_steps < 0:
+        raise ValueError("동적 스크롤 단계 수는 0 이상이어야 합니다.")
+    if config.dynamic_recursive_limit < 0:
+        raise ValueError("동적 재귀 큐 한도는 0 이상이어야 합니다.")
     validate_proxy_url(config.proxy_url)
     validate_output_path(config.output)
     validate_js_output_dir(config.js_output_dir)
@@ -555,6 +684,23 @@ def validate_proxy_url(proxy_url: str) -> None:
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
         raise ValueError("프록시 URL은 `http://host:port` 또는 `https://host:port` 형식이어야 합니다.")
+
+
+def redact_url_credentials(url: str) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlparse(value)
+        hostname = parsed.hostname or ""
+        if parsed.username is None and parsed.password is None:
+            return value
+        if ":" in hostname and not hostname.startswith("["):
+            hostname = f"[{hostname}]"
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        return parsed._replace(netloc=f"***:***@{hostname}{port}").geturl()
+    except ValueError:
+        return value
 
 
 WINDOWS_RESERVED_FILENAMES = {
@@ -632,6 +778,17 @@ def ensure_not_cancelled(execution: Optional[ExecutionContext]) -> None:
         raise ScanCancelled(CANCEL_MESSAGE)
 
 
+def wait_with_cancellation(seconds: float, execution: Optional[ExecutionContext] = None) -> None:
+    wait_seconds = max(0.0, float(seconds))
+    if wait_seconds <= 0:
+        return
+    if execution is None:
+        time.sleep(wait_seconds)
+        return
+    if execution.cancel_event.wait(wait_seconds):
+        raise ScanCancelled(CANCEL_MESSAGE)
+
+
 def _contains_invalid_header_value_chars(value: str) -> bool:
     return any((ord(character) < 32 and character != "\t") or ord(character) == 127 for character in value)
 
@@ -655,6 +812,15 @@ def parse_header_lines(text: str) -> Dict[str, str]:
             raise ValueError(f"{line_number}번째 줄의 헤더 값에 제어 문자를 포함할 수 없습니다.")
         headers[name] = value
     return headers
+
+
+def parse_header_entry(name: str, value: str) -> Tuple[str, str]:
+    normalized_name = str(name or "").strip()
+    normalized_value = str(value or "").strip()
+    headers = parse_header_lines(f"{normalized_name}: {normalized_value}")
+    if len(headers) != 1 or normalized_name not in headers:
+        raise ValueError("헤더 이름에는 콜론(:)이나 줄바꿈을 포함할 수 없습니다.")
+    return normalized_name, headers[normalized_name]
 
 
 def parse_hostname_filters(values: Optional[Sequence[str]]) -> Tuple[str, ...]:
@@ -727,6 +893,7 @@ def build_empty_scan_result(config: Config, url: str, error: str, status: str = 
     hardcoded_summary_fields = build_hardcoded_summary_fields([])
     return {
         "input_url": url,
+        "final_url": url,
         "scanned_at": scanned_at,
         "origin": get_origin_key(url),
         "probe_skipped": config.skip_probe,
@@ -736,7 +903,38 @@ def build_empty_scan_result(config: Config, url: str, error: str, status: str = 
         "max_depth": config.max_depth,
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
-        "proxy_url": config.proxy_url,
+        "proxy_url": redact_url_credentials(config.proxy_url),
+        "dynamic_analysis_enabled": config.dynamic_analysis,
+        "dynamic_wait": config.dynamic_wait,
+        "dynamic_max_events": config.dynamic_max_events,
+        "dynamic_collect_script_bodies": config.dynamic_collect_script_bodies,
+        "dynamic_script_body_limit": config.dynamic_script_body_limit,
+        "dynamic_action_scan": config.dynamic_action_scan,
+        "dynamic_action_limit": config.dynamic_action_limit,
+        "dynamic_scroll_steps": config.dynamic_scroll_steps,
+        "dynamic_recursive_limit": config.dynamic_recursive_limit,
+        "dynamic_analysis": {
+            "enabled": config.dynamic_analysis,
+            "success": False,
+            "events": [],
+            "dom_urls": [],
+            "script_urls": [],
+            "script_response_urls": [],
+            "script_response_count": 0,
+            "script_body_bytes": 0,
+            "http_request_count": 0,
+            "http_response_body_count": 0,
+            "http_body_bytes": 0,
+            "blocked_request_count": 0,
+            "blocked_request_urls": [],
+            "actions": [],
+            "action_count": 0,
+            "spa_urls": [],
+            "candidate_count": 0,
+            "api_candidate_count": 0,
+            "page_candidate_count": 0,
+            "error": error,
+        },
         "js_output_dir": str(normalize_js_output_dir(config.js_output_dir) or ""),
         "status": status,
         "error": error,
@@ -746,7 +944,7 @@ def build_empty_scan_result(config: Config, url: str, error: str, status: str = 
         "recursive_discovered_targets": [],
         "recursive_total_scans": 1,
         "recursive_failed_targets": [{"target_url": url, "depth": 0, "error": error}],
-        "recursive_dedupe": {"js": 0, "pages": 0, "apis": 0, "targets": 0},
+        "recursive_dedupe": {"js": 0, "pages": 0, "apis": 0, "targets": 0, "dynamic_limit": 0},
         "js_files": [],
         "accessible_pages": [],
         "accessible_apis": [],
@@ -760,6 +958,18 @@ def build_empty_scan_result(config: Config, url: str, error: str, status: str = 
             "js_discovered": 0,
             "js_fetched": 0,
             "js_saved": 0,
+            "dynamic_events": 0,
+            "dynamic_candidates": 0,
+            "dynamic_api_candidates": 0,
+            "dynamic_page_candidates": 0,
+            "dynamic_script_responses": 0,
+            "dynamic_script_body_bytes": 0,
+            "dynamic_http_requests": 0,
+            "dynamic_http_response_bodies": 0,
+            "dynamic_http_body_bytes": 0,
+            "dynamic_blocked_requests": 0,
+            "dynamic_actions": 0,
+            "dynamic_spa_urls": 0,
             "page_count": 0,
             "api_count": 0,
             **hardcoded_summary_fields,
@@ -782,6 +992,18 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
         "js_discovered": 0,
         "js_fetched": 0,
         "js_saved": 0,
+        "dynamic_events": 0,
+        "dynamic_candidates": 0,
+        "dynamic_api_candidates": 0,
+        "dynamic_page_candidates": 0,
+        "dynamic_script_responses": 0,
+        "dynamic_script_body_bytes": 0,
+        "dynamic_http_requests": 0,
+        "dynamic_http_response_bodies": 0,
+        "dynamic_http_body_bytes": 0,
+        "dynamic_blocked_requests": 0,
+        "dynamic_actions": 0,
+        "dynamic_spa_urls": 0,
         "page_count": 0,
         "api_count": 0,
         "hardcoded_total": 0,
@@ -798,6 +1020,18 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
         totals["js_discovered"] += int(summary.get("js_discovered", 0) or 0)
         totals["js_fetched"] += int(summary.get("js_fetched", 0) or 0)
         totals["js_saved"] += int(summary.get("js_saved", 0) or 0)
+        totals["dynamic_events"] += int(summary.get("dynamic_events", 0) or 0)
+        totals["dynamic_candidates"] += int(summary.get("dynamic_candidates", 0) or 0)
+        totals["dynamic_api_candidates"] += int(summary.get("dynamic_api_candidates", 0) or 0)
+        totals["dynamic_page_candidates"] += int(summary.get("dynamic_page_candidates", 0) or 0)
+        totals["dynamic_script_responses"] += int(summary.get("dynamic_script_responses", 0) or 0)
+        totals["dynamic_script_body_bytes"] += int(summary.get("dynamic_script_body_bytes", 0) or 0)
+        totals["dynamic_http_requests"] += int(summary.get("dynamic_http_requests", 0) or 0)
+        totals["dynamic_http_response_bodies"] += int(summary.get("dynamic_http_response_bodies", 0) or 0)
+        totals["dynamic_http_body_bytes"] += int(summary.get("dynamic_http_body_bytes", 0) or 0)
+        totals["dynamic_blocked_requests"] += int(summary.get("dynamic_blocked_requests", 0) or 0)
+        totals["dynamic_actions"] += int(summary.get("dynamic_actions", 0) or 0)
+        totals["dynamic_spa_urls"] += int(summary.get("dynamic_spa_urls", 0) or 0)
         totals["page_count"] += int(summary.get("page_count", 0) or 0)
         totals["api_count"] += int(summary.get("api_count", 0) or 0)
         totals["hardcoded_total"] += summary_count(summary, "hardcoded_total", "sensitive_total")
@@ -812,7 +1046,7 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
     recursive_total_scans = 0
     recursive_discovered_target_count = 0
     recursive_failed_target_count = 0
-    dedupe_totals = {"js": 0, "pages": 0, "apis": 0, "targets": 0}
+    dedupe_totals = {"js": 0, "pages": 0, "apis": 0, "targets": 0, "dynamic_limit": 0}
     for record in records:
         recursive_total_scans += int(record.get("recursive_total_scans", 1) or 1)
         recursive_discovered_target_count += len(record.get("recursive_discovered_targets", []) or [])
@@ -822,6 +1056,7 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
         dedupe_totals["pages"] += int(dedupe.get("pages", 0) or 0)
         dedupe_totals["apis"] += int(dedupe.get("apis", 0) or 0)
         dedupe_totals["targets"] += int(dedupe.get("targets", 0) or 0)
+        dedupe_totals["dynamic_limit"] += int(dedupe.get("dynamic_limit", 0) or 0)
 
     return {
         "input_urls": input_urls,
@@ -835,7 +1070,16 @@ def build_batch_result(records: List[dict], input_urls: List[str], config: Confi
         "max_depth": config.max_depth,
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
-        "proxy_url": config.proxy_url,
+        "proxy_url": redact_url_credentials(config.proxy_url),
+        "dynamic_analysis_enabled": config.dynamic_analysis,
+        "dynamic_wait": config.dynamic_wait,
+        "dynamic_max_events": config.dynamic_max_events,
+        "dynamic_collect_script_bodies": config.dynamic_collect_script_bodies,
+        "dynamic_script_body_limit": config.dynamic_script_body_limit,
+        "dynamic_action_scan": config.dynamic_action_scan,
+        "dynamic_action_limit": config.dynamic_action_limit,
+        "dynamic_scroll_steps": config.dynamic_scroll_steps,
+        "dynamic_recursive_limit": config.dynamic_recursive_limit,
         "js_output_dir": str(normalize_js_output_dir(config.js_output_dir) or ""),
         "result_count": len(records),
         "success_count": success_count,
@@ -890,6 +1134,65 @@ def should_allow_disallowed_host(url: str) -> bool:
         return False
     hostname = parsed.hostname or ""
     return bool(hostname) and _is_disallowed_host(hostname)
+
+
+def get_url_origin(url: str) -> Tuple[str, str, Optional[int]]:
+    parsed = urlparse(url)
+    default_port = 443 if parsed.scheme == "https" else 80 if parsed.scheme == "http" else None
+    return parsed.scheme.lower(), normalize_hostname(parsed.hostname or ""), parsed.port or default_port
+
+
+def urls_share_origin(left: str, right: str) -> bool:
+    try:
+        return get_url_origin(left) == get_url_origin(right)
+    except ValueError:
+        return False
+
+
+def request_headers_for_target(
+    headers: Optional[Dict[str, str]],
+    trusted_origin_url: str,
+    target_url: str,
+) -> Dict[str, str]:
+    source_headers = dict(headers or {})
+    if urls_share_origin(trusted_origin_url, target_url):
+        return source_headers
+    allowed_cross_origin_headers = {"user-agent", "accept", "accept-language"}
+    return {
+        key: value
+        for key, value in source_headers.items()
+        if key.lower() in allowed_cross_origin_headers
+    }
+
+
+def validate_redirect_target(source_url: str, target_url: str, *, allow_disallowed_host: bool = False) -> str:
+    try:
+        absolute = urljoin(source_url, target_url)
+    except ValueError as exc:
+        raise URLError(f"올바르지 않은 리디렉션 URL입니다: {target_url}") from exc
+    if not is_http_url(absolute, allow_disallowed_host=allow_disallowed_host):
+        raise URLError(f"차단된 리디렉션 대상입니다: {absolute}")
+    return absolute
+
+
+class SafeRedirectHandler(HTTPRedirectHandler):
+    def __init__(self, *, allow_disallowed_host: bool = False) -> None:
+        super().__init__()
+        self.allow_disallowed_host = allow_disallowed_host
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        safe_url = validate_redirect_target(
+            req.full_url,
+            newurl,
+            allow_disallowed_host=self.allow_disallowed_host,
+        )
+        redirected = super().redirect_request(req, fp, code, msg, headers, safe_url)
+        if redirected is not None and not urls_share_origin(req.full_url, safe_url):
+            allowed_headers = {key.lower() for key in DEFAULT_REQUEST_HEADERS}
+            for key, _ in redirected.header_items():
+                if key.lower() not in allowed_headers:
+                    redirected.remove_header(key)
+        return redirected
 
 
 def resolve_absolute_url(base_url: str, candidate: str, *, allow_disallowed_host: bool = False) -> Optional[str]:
@@ -1010,7 +1313,7 @@ def url_matches_scope(url: str, scope: UrlScope) -> bool:
     if hostname != scope.hostname and is_hostname_excluded(hostname, scope.excluded_hostnames):
         return False
     if scope.include_subdomains:
-        return get_site_hostname_key(hostname) == scope.site_hostname
+        return hostname == scope.hostname or hostname.endswith(f".{scope.hostname}")
     return hostname == scope.hostname
 
 
@@ -1064,14 +1367,13 @@ def fetch_text(
         if execution is not None:
             execution.request_throttle.wait_for_turn(cancel_event=execution.cancel_event)
             ensure_not_cancelled(execution)
+        handlers = [SafeRedirectHandler(allow_disallowed_host=should_allow_disallowed_host(url))]
         if proxy:
-            proxy_handlers = [ProxyHandler({"http": proxy, "https": proxy})]
-            if ssl_context is not None:
-                proxy_handlers.append(HTTPSHandler(context=ssl_context))
-            opener = build_opener(*proxy_handlers)
-            request_context = opener.open(request, timeout=timeout)
-        else:
-            request_context = urlopen(request, timeout=timeout, context=ssl_context)
+            handlers.append(ProxyHandler({"http": proxy, "https": proxy}))
+        if ssl_context is not None:
+            handlers.append(HTTPSHandler(context=ssl_context))
+        opener = build_opener(*handlers)
+        request_context = opener.open(request, timeout=timeout)
         with request_context as response:
             text = read_response_text(response)
             return FetchResult(
@@ -1081,6 +1383,7 @@ def fetch_text(
                 success=True,
                 length=response_length(response, text),
                 content_type=response.headers.get("Content-Type"),
+                final_url=response.geturl(),
             )
     except HTTPError as exc:
         error_text = ""
@@ -1100,6 +1403,7 @@ def fetch_text(
             length=len(error_text),
             error=error_message,
             content_type=exc.headers.get("Content-Type"),
+            final_url=exc.geturl(),
         )
     except URLError as exc:
         return FetchResult(url=url, status_code=None, text="", success=False, length=0, error=str(exc.reason))
@@ -1112,6 +1416,16 @@ def fetch_text(
             length=0,
             error=str(exc) or exc.__class__.__name__,
         )
+
+
+def format_fetch_failure(result: FetchResult, verify_ssl: bool = True) -> str:
+    reason = str(result.error or result.status_code or "unknown error")
+    if verify_ssl and "CERTIFICATE_VERIFY_FAILED" in reason:
+        reason = (
+            f"{reason} / SSL 인증서 검증 실패: 사내 CA 또는 자체 서명 인증서를 사용하는 사이트일 수 있습니다. "
+            "신뢰할 수 있는 대상이면 GUI에서 'SSL 검증' 체크를 해제하거나 CLI에서 --no-verify-ssl 옵션을 사용하세요."
+        )
+    return reason
 
 
 def emit_progress(progress: ProgressCallback, message: str) -> None:
@@ -1303,6 +1617,626 @@ def collect_path_candidates(
         discard_candidate(api_bucket, absolute)
 
 
+def _dynamic_event_is_api(event: dict, url: str) -> bool:
+    resource_type = str(event.get("resource_type") or "").lower()
+    method = str(event.get("method") or "GET").upper()
+    content_type = str(event.get("content_type") or "").lower()
+    if resource_type in {"fetch", "xhr", "eventsource", "websocket"}:
+        return True
+    if method not in {"GET", "HEAD"}:
+        return True
+    if "json" in content_type or "graphql" in content_type:
+        return True
+    return classify_candidate("", url) == "api"
+
+
+def _add_dynamic_candidate(
+    page_bucket: Dict[str, Candidate],
+    api_bucket: Dict[str, Candidate],
+    url: str,
+    source_label: str,
+    scope: UrlScope,
+    event: Optional[dict] = None,
+) -> bool:
+    absolute = resolve_absolute_url(url, url, allow_disallowed_host=True)
+    if not absolute or not url_matches_scope(absolute, scope):
+        return False
+
+    path = normalize_path(absolute)
+    if path == "/" or is_static_asset(path):
+        return False
+
+    if event is not None and _dynamic_event_is_api(event, absolute):
+        add_api_candidate(api_bucket, page_bucket, absolute, source_label)
+    elif classify_candidate("", absolute) == "api":
+        add_api_candidate(api_bucket, page_bucket, absolute, source_label)
+    else:
+        add_candidate(page_bucket, absolute, source_label, "page")
+    return True
+
+
+def _is_dynamic_source_value(source: object) -> bool:
+    return str(source or "").lower().startswith("playwright:")
+
+
+def result_row_has_dynamic_source(row: dict) -> bool:
+    return any(_is_dynamic_source_value(source) for source in (row.get("sources", []) or []))
+
+
+def _is_script_response_event(event: dict) -> bool:
+    content_type = str(event.get("content_type") or "").lower()
+    resource_type = str(event.get("resource_type") or "").lower()
+    url = str(event.get("url") or "")
+    if resource_type == "script":
+        return True
+    if any(token in content_type for token in ("javascript", "ecmascript", "text/js", "application/x-javascript")):
+        return True
+    return should_follow_js(url)
+
+
+def _is_textual_http_response_event(event: dict) -> bool:
+    content_type = str(event.get("content_type") or "").lower()
+    resource_type = str(event.get("resource_type") or "").lower()
+    if resource_type in {"document", "script", "xhr", "fetch", "eventsource"}:
+        return True
+    return any(
+        token in content_type
+        for token in (
+            "text/",
+            "json",
+            "javascript",
+            "ecmascript",
+            "xml",
+            "html",
+            "graphql",
+            "x-www-form-urlencoded",
+        )
+    )
+
+
+def _headers_to_scan_text(headers: object) -> str:
+    if not isinstance(headers, dict):
+        return ""
+    return "\n".join(f"{key}: {value}" for key, value in headers.items())
+
+
+def _safe_playwright_text(value: object, limit: int = 160) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text[:limit]
+
+
+def _dynamic_dom_snapshot_script() -> str:
+    return """() => {
+        const values = new Set();
+        const scripts = new Set();
+        const router = Array.isArray(window.__routeApiDiscoveryUrls) ? window.__routeApiDiscoveryUrls : [];
+        for (const el of document.querySelectorAll('[href], [src], form[action]')) {
+            const value = el.href || el.src || el.action;
+            if (value) values.add(value);
+        }
+        for (const script of document.querySelectorAll('script[src]')) {
+            if (script.src) scripts.add(script.src);
+        }
+        for (const entry of performance.getEntriesByType('resource')) {
+            if (entry && entry.name) values.add(entry.name);
+        }
+        return {
+            url: location.href,
+            urls: Array.from(values),
+            scripts: Array.from(scripts),
+            router: router.slice()
+        };
+    }"""
+
+
+def _dynamic_history_init_script() -> str:
+    return """(() => {
+        if (window.__routeApiDiscoveryInstalled) return;
+        window.__routeApiDiscoveryInstalled = true;
+        window.__routeApiDiscoveryUrls = [];
+        const record = (kind, value) => {
+            try {
+                const resolved = value === undefined || value === null ? location.href : new URL(String(value), location.href).href;
+                window.__routeApiDiscoveryUrls.push({kind, url: resolved, at: Date.now()});
+            } catch (_) {}
+        };
+        for (const name of ['pushState', 'replaceState']) {
+            const original = history[name];
+            history[name] = function(state, title, url) {
+                const result = original.apply(this, arguments);
+                if (url !== undefined) record(name, url);
+                record('location', location.href);
+                return result;
+            };
+        }
+        addEventListener('popstate', () => record('popstate', location.href));
+        addEventListener('hashchange', () => record('hashchange', location.href));
+        record('initial', location.href);
+    })();"""
+
+
+def _dynamic_action_candidates_script(limit: int) -> str:
+    return f"""() => {{
+        const limit = {max(0, int(limit))};
+        const badWords = [
+            'delete','remove','logout','log out','sign out','withdraw','unsubscribe',
+            'payment','pay','purchase','checkout','order','submit','confirm','cancel',
+            '삭제','제거','로그아웃','탈퇴','결제','구매','주문','제출','확인','취소'
+        ];
+        const nodes = Array.from(document.querySelectorAll(
+            'a[href], button, [role="button"], [role="tab"], [data-bs-toggle="tab"], summary'
+        ));
+        const result = [];
+        for (const node of nodes) {{
+            const style = getComputedStyle(node);
+            const rect = node.getBoundingClientRect();
+            const text = (node.innerText || node.textContent || node.getAttribute('aria-label') || node.getAttribute('title') || '').trim();
+            const lowered = text.toLowerCase();
+            const tag = node.tagName.toLowerCase();
+            const type = (node.getAttribute('type') || '').toLowerCase();
+            const href = node.href || node.getAttribute('href') || '';
+            const role = (node.getAttribute('role') || '').toLowerCase();
+            if (result.length >= limit) break;
+            if (rect.width < 4 || rect.height < 4 || style.visibility === 'hidden' || style.display === 'none') continue;
+            if (node.disabled || node.getAttribute('aria-disabled') === 'true') continue;
+            if (tag === 'button' && ['submit', 'reset'].includes(type)) continue;
+            if (badWords.some(word => lowered.includes(word))) continue;
+            if (!href && !text && role !== 'tab') continue;
+            node.setAttribute('data-route-api-dynamic-action', String(result.length));
+            result.push({{
+                selector: `[data-route-api-dynamic-action="${{result.length}}"]`,
+                text: text.slice(0, 120),
+                href,
+                role,
+                tag
+            }});
+        }}
+        return result;
+    }}"""
+
+
+def collect_dynamic_candidates_with_playwright(
+    url: str,
+    scope: UrlScope,
+    config: Config,
+    page_bucket: Dict[str, Candidate],
+    api_bucket: Dict[str, Candidate],
+    hardcoded_findings: List[dict],
+    hardcoded_dedupe_keys: Set[Tuple[str, str, str, str, int, int]],
+    execution: Optional[ExecutionContext] = None,
+    progress: ProgressCallback = None,
+) -> dict:
+    ensure_not_cancelled(execution)
+    result = {
+        "enabled": True,
+        "success": False,
+        "url": url,
+        "final_url": "",
+        "title": "",
+        "error": "",
+        "wait_seconds": config.dynamic_wait,
+        "max_events": config.dynamic_max_events,
+        "events": [],
+        "dom_urls": [],
+        "script_urls": [],
+        "script_response_urls": [],
+        "script_response_count": 0,
+        "script_body_bytes": 0,
+        "http_request_count": 0,
+        "http_response_body_count": 0,
+        "http_body_bytes": 0,
+        "blocked_request_count": 0,
+        "blocked_request_urls": [],
+        "action_count": 0,
+        "actions": [],
+        "spa_urls": [],
+        "candidate_count": 0,
+        "api_candidate_count": 0,
+        "page_candidate_count": 0,
+        "duration_ms": 0,
+    }
+
+    try:
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        result["error"] = (
+            "Playwright가 설치되어 있지 않습니다. `pip install -e .` 후 "
+            "`python -m playwright install chromium`을 실행해 주세요."
+        )
+        emit_progress(progress, f"동적 분석 건너뜀: {result['error']}")
+        return result
+
+    started = time.monotonic()
+    events: List[dict] = []
+    request_event_by_id: Dict[int, dict] = {}
+    dom_urls: Set[str] = set()
+    script_urls: Set[str] = set()
+    script_response_urls: Set[str] = set()
+    script_body_bytes = 0
+    http_request_count = 0
+    http_response_body_count = 0
+    http_body_bytes = 0
+    blocked_request_urls: Set[str] = set()
+    action_records: List[dict] = []
+    spa_urls: Set[str] = set()
+
+    def remember_event(event: dict) -> Optional[dict]:
+        if len(events) >= config.dynamic_max_events:
+            return None
+        events.append(event)
+        return event
+
+    try:
+        emit_progress(progress, f"Playwright 동적 분석 시작: {url}")
+        with sync_playwright() as playwright:
+            launch_options = {"headless": True}
+            if config.proxy_url:
+                launch_options["proxy"] = {"server": config.proxy_url}
+            browser = playwright.chromium.launch(**launch_options)
+            try:
+                same_origin_headers = {key: value for key, value in config.headers.items() if key.lower() != "user-agent"}
+                context = browser.new_context(
+                    user_agent=config.headers.get("User-Agent", USER_AGENT),
+                    ignore_https_errors=not config.verify_ssl,
+                )
+                allow_disallowed_dynamic_host = should_allow_disallowed_host(url)
+
+                def guard_request(route) -> None:
+                    request_url = str(route.request.url or "")
+                    parsed = urlparse(request_url)
+                    if parsed.scheme in {"http", "https"} and not is_http_url(
+                        request_url,
+                        allow_disallowed_host=allow_disallowed_dynamic_host,
+                    ):
+                        blocked_request_urls.add(request_url)
+                        route.abort()
+                        return
+                    if same_origin_headers and urls_share_origin(config.url, request_url):
+                        request_headers = dict(route.request.headers)
+                        request_headers.update(same_origin_headers)
+                        route.continue_(headers=request_headers)
+                        return
+                    route.continue_()
+
+                context.route("**/*", guard_request)
+                page = context.new_page()
+                page.add_init_script(_dynamic_history_init_script())
+
+                def analyze_http_text(text: str, base_url: str, source_label: str, source_type: str) -> None:
+                    if not text:
+                        return
+                    collect_path_candidates(
+                        text=text,
+                        base_url=base_url,
+                        source_label=source_label,
+                        scope=scope,
+                        page_bucket=page_bucket,
+                        api_bucket=api_bucket,
+                    )
+                    collect_hardcoded_findings(
+                        text=text,
+                        source_url=base_url,
+                        source_label=source_label,
+                        source_type=source_type,
+                        findings=hardcoded_findings,
+                        dedupe_keys=hardcoded_dedupe_keys,
+                    )
+                    for child_url in extract_additional_js_urls(text, base_url, scope):
+                        script_urls.add(child_url)
+
+                def on_request(request) -> None:
+                    nonlocal http_request_count
+                    http_request_count += 1
+                    if request.resource_type == "script" or should_follow_js(request.url):
+                        script_urls.add(request.url)
+                    request_text_parts = [request.url]
+                    try:
+                        request_text_parts.append(_headers_to_scan_text(request.headers))
+                    except Exception:
+                        pass
+                    try:
+                        post_data = request.post_data
+                    except Exception:
+                        post_data = ""
+                    if post_data:
+                        request_text_parts.append(str(post_data))
+                    analyze_http_text(
+                        "\n".join(part for part in request_text_parts if part),
+                        request.url,
+                        f"playwright:http-request:{request.method}:{request.url}",
+                        "dynamic_http_request",
+                    )
+                    _add_dynamic_candidate(
+                        page_bucket,
+                        api_bucket,
+                        request.url,
+                        f"playwright:http-request:{request.resource_type}:{request.method}",
+                        scope,
+                        {
+                            "url": request.url,
+                            "method": request.method,
+                            "resource_type": request.resource_type,
+                            "content_type": "",
+                        },
+                    )
+                    event = remember_event(
+                        {
+                            "url": request.url,
+                            "method": request.method,
+                            "resource_type": request.resource_type,
+                            "status_code": None,
+                            "content_type": "",
+                            "source": "request",
+                        }
+                    )
+                    if event is not None:
+                        request_event_by_id[id(request)] = event
+
+                def on_response(response) -> None:
+                    nonlocal script_body_bytes, http_response_body_count, http_body_bytes
+                    event = request_event_by_id.get(id(response.request))
+                    if event is None:
+                        event = remember_event(
+                            {
+                                "url": response.url,
+                                "method": response.request.method,
+                                "resource_type": response.request.resource_type,
+                                "source": "response",
+                            }
+                        )
+                    analysis_event = {
+                        "url": response.url,
+                        "method": response.request.method,
+                        "resource_type": response.request.resource_type,
+                        "status_code": response.status,
+                        "content_type": response.headers.get("content-type", ""),
+                    }
+                    if event is not None:
+                        event["status_code"] = response.status
+                        event["content_type"] = response.headers.get("content-type", "")
+                    _add_dynamic_candidate(
+                        page_bucket,
+                        api_bucket,
+                        response.url,
+                        f"playwright:http-response:{analysis_event['resource_type']}:{analysis_event['method']}",
+                        scope,
+                        analysis_event,
+                    )
+                    if _is_script_response_event(analysis_event):
+                        script_response_urls.add(response.url)
+                        script_urls.add(response.url)
+                    if not _is_textual_http_response_event(analysis_event):
+                        return
+                    if config.dynamic_script_body_limit == 0:
+                        return
+                    if _is_script_response_event(analysis_event) and not config.dynamic_collect_script_bodies:
+                        return
+                    try:
+                        body = response.text()
+                    except Exception as exc:
+                        if event is not None:
+                            event["body_error"] = str(exc)
+                        return
+                    encoded_length = len(body.encode("utf-8", errors="ignore"))
+                    if encoded_length > config.dynamic_script_body_limit:
+                        if event is not None:
+                            event["body_error"] = f"body too large ({encoded_length} bytes)"
+                        return
+                    http_response_body_count += 1
+                    http_body_bytes += encoded_length
+                    if event is not None:
+                        event["body_analyzed"] = True
+                        event["body_length"] = encoded_length
+                    if _is_script_response_event(analysis_event):
+                        script_body_bytes += encoded_length
+                        source_label = f"playwright:response-js:{response.url}"
+                        source_type = "dynamic_js_response"
+                    else:
+                        source_label = f"playwright:http-response-body:{analysis_event['resource_type']}:{response.url}"
+                        source_type = "dynamic_http_response"
+                    analyze_http_text(body, response.url, source_label, source_type)
+
+                def collect_page_snapshot(label: str) -> None:
+                    ensure_not_cancelled(execution)
+                    try:
+                        snapshot = page.evaluate(_dynamic_dom_snapshot_script())
+                    except Exception:
+                        snapshot = {"url": page.url, "urls": [], "scripts": [], "router": []}
+
+                    current_url = str(snapshot.get("url") or page.url or "")
+                    if current_url:
+                        dom_urls.add(current_url)
+                    dom_urls.update(str(item) for item in (snapshot.get("urls", []) or []) if item)
+                    script_urls.update(str(item) for item in (snapshot.get("scripts", []) or []) if item)
+                    for item in snapshot.get("router", []) or []:
+                        router_url = str((item or {}).get("url") or "")
+                        if router_url:
+                            spa_urls.add(router_url)
+                            dom_urls.add(router_url)
+
+                    try:
+                        rendered_html = page.content()
+                    except Exception:
+                        rendered_html = ""
+                    if rendered_html:
+                        source_url = current_url or url
+                        collect_path_candidates(
+                            text=rendered_html,
+                            base_url=source_url,
+                            source_label=f"playwright:dom:{label}:{source_url}",
+                            scope=scope,
+                            page_bucket=page_bucket,
+                            api_bucket=api_bucket,
+                        )
+                        collect_hardcoded_findings(
+                            text=rendered_html,
+                            source_url=source_url,
+                            source_label=f"playwright:dom:{label}:{source_url}",
+                            source_type="dynamic_html",
+                            findings=hardcoded_findings,
+                            dedupe_keys=hardcoded_dedupe_keys,
+                        )
+
+                def run_dynamic_actions() -> None:
+                    if not config.dynamic_action_scan:
+                        return
+                    wait_ms = max(100, min(int(config.dynamic_wait * 500), 1500))
+                    for step in range(config.dynamic_scroll_steps):
+                        ensure_not_cancelled(execution)
+                        try:
+                            page.mouse.wheel(0, 900)
+                            page.wait_for_timeout(wait_ms)
+                            collect_page_snapshot(f"scroll-{step + 1}")
+                        except Exception as exc:
+                            action_records.append({"kind": "scroll", "index": step + 1, "error": str(exc)})
+
+                    try:
+                        candidates = page.evaluate(_dynamic_action_candidates_script(config.dynamic_action_limit))
+                    except Exception as exc:
+                        action_records.append({"kind": "candidate-scan", "error": str(exc)})
+                        return
+
+                    clicked = 0
+                    for index, item in enumerate(candidates or [], start=1):
+                        if clicked >= config.dynamic_action_limit:
+                            break
+                        ensure_not_cancelled(execution)
+                        selector = str((item or {}).get("selector") or "")
+                        if not selector:
+                            continue
+                        before_url = page.url
+                        href = str((item or {}).get("href") or "")
+                        absolute_href = resolve_absolute_url(before_url, href, allow_disallowed_host=should_allow_disallowed_host(before_url)) if href else None
+                        if absolute_href and not url_matches_scope(absolute_href, scope):
+                            continue
+                        record = {
+                            "kind": "click",
+                            "index": index,
+                            "text": _safe_playwright_text((item or {}).get("text")),
+                            "href": href,
+                            "role": str((item or {}).get("role") or ""),
+                            "tag": str((item or {}).get("tag") or ""),
+                            "before_url": before_url,
+                            "after_url": "",
+                            "error": "",
+                        }
+                        try:
+                            page.locator(selector).click(timeout=1500)
+                            clicked += 1
+                            page.wait_for_timeout(wait_ms)
+                            try:
+                                page.wait_for_load_state("networkidle", timeout=max(500, wait_ms))
+                            except PlaywrightTimeoutError:
+                                pass
+                            record["after_url"] = page.url
+                            collect_page_snapshot(f"action-{clicked}")
+                            if page.url != before_url:
+                                dom_urls.add(page.url)
+                                try:
+                                    page.go_back(wait_until="domcontentloaded", timeout=int(config.timeout * 1000))
+                                    page.wait_for_timeout(wait_ms)
+                                except Exception:
+                                    pass
+                        except Exception as exc:
+                            record["error"] = str(exc)
+                        action_records.append(record)
+
+                page.on("request", on_request)
+                page.on("response", on_response)
+                page.goto(url, wait_until="domcontentloaded", timeout=int(config.timeout * 1000))
+                ensure_not_cancelled(execution)
+                wait_ms = int(config.dynamic_wait * 1000)
+                if wait_ms > 0:
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=wait_ms)
+                    except PlaywrightTimeoutError:
+                        pass
+                    page.wait_for_timeout(wait_ms)
+
+                collect_page_snapshot("initial")
+                run_dynamic_actions()
+                collect_page_snapshot("final")
+
+                result["final_url"] = page.url
+                try:
+                    result["title"] = page.title()
+                except Exception:
+                    result["title"] = ""
+                context.close()
+            finally:
+                browser.close()
+
+        script_urls.update(script_response_urls)
+        result["dom_urls"] = sorted(dom_urls)
+        result["script_urls"] = sorted(script_urls)
+        result["script_response_urls"] = sorted(script_response_urls)
+        result["script_response_count"] = len(script_response_urls)
+        result["script_body_bytes"] = script_body_bytes
+        result["http_request_count"] = http_request_count
+        result["http_response_body_count"] = http_response_body_count
+        result["http_body_bytes"] = http_body_bytes
+        result["blocked_request_count"] = len(blocked_request_urls)
+        result["blocked_request_urls"] = sorted(blocked_request_urls)
+        result["actions"] = action_records
+        result["action_count"] = sum(1 for item in action_records if item.get("kind") == "click" and not item.get("error"))
+        result["spa_urls"] = sorted(spa_urls)
+
+        page_count = 0
+        api_count = 0
+        for event in events:
+            source = f"playwright:{event.get('resource_type') or 'request'}:{event.get('method') or 'GET'}"
+            before_pages = len(page_bucket)
+            before_apis = len(api_bucket)
+            if _add_dynamic_candidate(page_bucket, api_bucket, str(event.get("url") or ""), source, scope, event):
+                page_count += max(0, len(page_bucket) - before_pages)
+                api_count += max(0, len(api_bucket) - before_apis)
+
+        for dom_url in result["dom_urls"]:
+            before_pages = len(page_bucket)
+            before_apis = len(api_bucket)
+            if _add_dynamic_candidate(page_bucket, api_bucket, str(dom_url), "playwright:dom-url", scope):
+                page_count += max(0, len(page_bucket) - before_pages)
+                api_count += max(0, len(api_bucket) - before_apis)
+
+        for spa_url in result["spa_urls"]:
+            before_pages = len(page_bucket)
+            before_apis = len(api_bucket)
+            if _add_dynamic_candidate(page_bucket, api_bucket, str(spa_url), "playwright:history", scope):
+                page_count += max(0, len(page_bucket) - before_pages)
+                api_count += max(0, len(api_bucket) - before_apis)
+
+        result["events"] = events
+        result["candidate_count"] = page_count + api_count
+        result["api_candidate_count"] = api_count
+        result["page_candidate_count"] = page_count
+        result["success"] = True
+        emit_progress(progress, f"Playwright 동적 분석 완료: 네트워크 이벤트 {len(events)}개, 후보 {result['candidate_count']}개")
+    except ScanCancelled:
+        raise
+    except Exception as exc:
+        result["events"] = events
+        result["dom_urls"] = sorted(dom_urls)
+        result["script_urls"] = sorted(script_urls | script_response_urls)
+        result["script_response_urls"] = sorted(script_response_urls)
+        result["script_response_count"] = len(script_response_urls)
+        result["script_body_bytes"] = script_body_bytes
+        result["http_request_count"] = http_request_count
+        result["http_response_body_count"] = http_response_body_count
+        result["http_body_bytes"] = http_body_bytes
+        result["blocked_request_count"] = len(blocked_request_urls)
+        result["blocked_request_urls"] = sorted(blocked_request_urls)
+        result["actions"] = action_records
+        result["action_count"] = sum(1 for item in action_records if item.get("kind") == "click" and not item.get("error"))
+        result["spa_urls"] = sorted(spa_urls)
+        result["error"] = str(exc)
+        emit_progress(progress, f"Playwright 동적 분석 실패: {exc}")
+    finally:
+        result["duration_ms"] = int((time.monotonic() - started) * 1000)
+
+    return result
+
+
 def extract_html_assets(html: str, page_url: str, scope: UrlScope) -> Tuple[List[str], List[str]]:
     parser = ScriptHtmlParser()
     parser.feed(html)
@@ -1345,6 +2279,33 @@ def _line_column_from_offset(text: str, index: int) -> Tuple[int, int]:
     return line, column
 
 
+def _normalize_mobile_phone_digits(value: str) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    digits = re.sub(r"\D", "", raw)
+    if digits.startswith("0082"):
+        digits = "0" + digits[4:]
+    elif digits.startswith("82") and len(digits) in {11, 12}:
+        digits = "0" + digits[2:]
+
+    if not re.fullmatch(r"01[016789]\d{7,8}", digits):
+        return None
+    if digits.startswith("010") and len(digits) != 11:
+        return None
+    if not digits.startswith("010") and len(digits) not in {10, 11}:
+        return None
+
+    subscriber = digits[3:]
+    if len(set(subscriber)) <= 1:
+        return None
+    if re.search(r"(\d)\1{5,}", subscriber):
+        return None
+    if subscriber in "01234567890123456789" or subscriber in "98765432109876543210":
+        return None
+    return digits
+
+
 def _extract_context_snippet(text: str, start: int, end: int, radius: int = HARD_CODED_LINE_CONTEXT_RADIUS) -> str:
     left = max(0, start - radius)
     right = min(len(text), end + radius)
@@ -1369,7 +2330,7 @@ def _normalize_hardcoded_value(category: str, value: str) -> str:
     if category == "email":
         return raw.lower()
     if category == "phone":
-        return re.sub(r"\D", "", raw)
+        return _normalize_mobile_phone_digits(raw) or re.sub(r"\D", "", raw)
     if category in {"person_name", "account_id", "user_id"}:
         return re.sub(r"\s+", " ", raw).strip().lower()
     return raw.strip()
@@ -1387,13 +2348,60 @@ def _is_placeholder_hardcoded_value(category: str, value: str, normalized_value:
         if domain in HARD_CODED_EMAIL_PLACEHOLDER_DOMAINS:
             return True
     if category == "phone":
-        digits = re.sub(r"\D", "", lowered)
+        digits = _normalize_mobile_phone_digits(lowered) or re.sub(r"\D", "", lowered)
         if not digits:
             return True
         if digits in {"0" * len(digits), "1" * len(digits)}:
             return True
     if "dummy" in lowered or "sample" in lowered or "fixture" in lowered or "mock" in lowered:
         return True
+    return False
+
+
+def _shannon_entropy(value: str) -> float:
+    raw = str(value or "")
+    if not raw:
+        return 0.0
+    counts: Dict[str, int] = {}
+    for char in raw:
+        counts[char] = counts.get(char, 0) + 1
+    length = len(raw)
+    return -sum((count / length) * math.log2(count / length) for count in counts.values())
+
+
+def _looks_like_encoded_secret_value(value: str) -> bool:
+    raw = str(value or "").strip()
+    if len(raw) < 16:
+        return False
+    if re.fullmatch(r"[A-Fa-f0-9]{32,}", raw):
+        return True
+    if re.fullmatch(r"[A-Za-z0-9+/]{24,}={0,2}", raw):
+        return _shannon_entropy(raw) >= 3.4
+    if re.fullmatch(r"[A-Za-z0-9_-]{24,}", raw):
+        return _shannon_entropy(raw) >= 3.4
+    return False
+
+
+def _is_plausible_hardcoded_secret(category: str, field_name: str, value: str, matched_by: str) -> bool:
+    if category not in HARD_CODED_SECRET_CATEGORIES:
+        return True
+    raw = str(value or "").strip()
+    lowered = raw.lower()
+    if not raw:
+        return False
+    if matched_by.startswith("regex.secret."):
+        return True
+    if len(raw) < 8 and category == "credential":
+        return lowered not in HARD_CODED_PLACEHOLDER_VALUES
+    if len(raw) < 12:
+        return False
+    if raw.startswith("-----BEGIN ") and " KEY-----" in raw:
+        return True
+    if _looks_like_encoded_secret_value(raw):
+        return True
+    normalized_field = _normalize_hardcoded_field_name(field_name)
+    if any(token in normalized_field for token in ("password", "passwd", "pwd")):
+        return len(raw) >= 8 and lowered not in HARD_CODED_PLACEHOLDER_VALUES
     return False
 
 
@@ -1408,34 +2416,53 @@ def _mask_middle(value: str, visible_prefix: int = 4, visible_suffix: int = 4) -
 
 def _mask_hardcoded_value(category: str, value: str) -> str:
     raw = str(value or "").strip()
-    return raw
+    if not raw:
+        return ""
+    if category == "email" and "@" in raw:
+        local, domain = raw.split("@", 1)
+        return f"{local[:1]}***@{domain}"
+    if category == "phone":
+        digits = _normalize_mobile_phone_digits(raw) or re.sub(r"\D", "", raw)
+        if len(digits) >= 7:
+            return f"{digits[:3]}-****-{digits[-4:]}"
+        return "*" * len(raw)
+    if category == "credential":
+        return "********"
+    if category == "token":
+        return _mask_middle(raw)
+    if category == "person_name":
+        return f"{raw[:1]}{'*' * max(1, len(raw) - 1)}"
+    return _mask_middle(raw, visible_prefix=2, visible_suffix=2)
+
+
+def _hardcoded_value_fingerprint(normalized_value: str) -> str:
+    return f"sha256:{hashlib.sha256(str(normalized_value or '').encode('utf-8')).hexdigest()}"
 
 
 def _is_valid_phone_candidate(value: str) -> bool:
-    return _is_valid_phone_candidate_with_context(value, field_name="", context="")
+    return _normalize_mobile_phone_digits(value) is not None
 
 
 def _has_phone_context(field_name: str, context: str) -> bool:
     normalized_field = _normalize_hardcoded_field_name(field_name)
     if normalized_field in HARD_CODED_PHONE_KEYS:
         return True
-    context_lower = str(context or "").lower()
-    return any(hint in context_lower for hint in HARD_CODED_PHONE_CONTEXT_HINTS)
+    if any(normalized_field.endswith(suffix) for suffix in HARD_CODED_PHONE_FIELD_SUFFIXES):
+        return True
+    context_text = str(context or "")
+    context_lower = context_text.lower()
+    if HARD_CODED_PHONE_CONTEXT_RE.search(context_lower):
+        return True
+    return any(hint in context_text for hint in HARD_CODED_PHONE_CONTEXT_HINTS)
 
 
 def _is_valid_phone_candidate_with_context(value: str, field_name: str, context: str) -> bool:
     raw = str(value or "").strip()
     if not raw:
         return False
-    digits = re.sub(r"\D", "", raw)
-    if len(digits) < 8 or len(digits) > 15:
+    if _normalize_mobile_phone_digits(raw) is None:
         return False
-    if re.fullmatch(r"(19|20)\d{6}", digits):
-        return False
-    raw_lower = raw.lower()
-    if raw_lower.startswith(("+", "00")) and not _has_phone_context(field_name, context):
-        return False
-    return True
+    return _has_phone_context(field_name, context)
 
 
 def _is_probable_person_name(value: str) -> bool:
@@ -1470,6 +2497,10 @@ def _categorize_hardcoded_field(field_name: str, value: str) -> Optional[str]:
         return "credential"
     if normalized_key in HARD_CODED_TOKEN_KEYS:
         return "token"
+    if any(token in normalized_key for token in ("apikey", "accesstoken", "refreshtoken", "idtoken", "clientsecret", "secretkey", "encryptionkey", "signingkey", "privatekey", "jwtsecret", "hmackey", "hmacsecret", "aeskey", "cryptokey")):
+        return "token"
+    if any(token in normalized_key for token in ("password", "passwd")):
+        return "credential"
     return None
 
 
@@ -1542,7 +2573,9 @@ def _append_hardcoded_finding(
         return
 
     is_placeholder = _is_placeholder_hardcoded_value(category, value, normalized_value)
-    if is_placeholder and category in HARD_CODED_SECRET_CATEGORIES:
+    if is_placeholder:
+        return
+    if not _is_plausible_hardcoded_secret(category, field_name, value, matched_by):
         return
     confidence = _score_hardcoded_finding(
         category=category,
@@ -1559,7 +2592,7 @@ def _append_hardcoded_finding(
             "field_name": field_name,
             "value": value,
             "masked_value": masked_value,
-            "normalized_value": normalized_value,
+            "normalized_value": _hardcoded_value_fingerprint(normalized_value),
             "source_type": source_type,
             "source_url": source_url,
             "source_label": source_label,
@@ -1816,7 +2849,9 @@ def probe_candidate(
     verify_ssl: bool = True,
     proxy_url: str = "",
 ) -> ProbeResult:
-    methods: Iterable[str] = ("GET", "POST")
+    # Discovery must not mutate a target. HEAD keeps the common path cheap,
+    # while GET covers servers that do not implement HEAD correctly.
+    methods: Iterable[str] = ("HEAD", "GET")
     for method in methods:
         fetch_kwargs = {
             "timeout": timeout,
@@ -1838,6 +2873,8 @@ def probe_candidate(
                 error="인증 또는 권한이 필요합니다.",
                 length=result.length,
             )
+        if method == "HEAD":
+            continue
         if result.status_code not in {405, 501, None}:
             return ProbeResult(
                 accessible=False,
@@ -1855,6 +2892,7 @@ def build_result_row(
     timeout: float,
     skip_probe: bool,
     headers: Optional[Dict[str, str]] = None,
+    header_origin_url: str = "",
     execution: Optional[ExecutionContext] = None,
     verify_ssl: bool = True,
     proxy_url: str = "",
@@ -1862,11 +2900,12 @@ def build_result_row(
     if skip_probe:
         probe = ProbeResult(accessible=None, status_code=None, method=None, error="프로브가 생략되었습니다.")
     else:
+        probe_headers = request_headers_for_target(headers, header_origin_url, candidate.url) if header_origin_url else headers
         probe = probe_candidate(
             candidate.url,
             kind=kind,
             timeout=timeout,
-            headers=headers,
+            headers=probe_headers,
             execution=execution,
             verify_ssl=verify_ssl,
             proxy_url=proxy_url,
@@ -1889,6 +2928,7 @@ def build_result_rows(
     timeout: float,
     skip_probe: bool,
     headers: Optional[Dict[str, str]] = None,
+    header_origin_url: str = "",
     execution: Optional[ExecutionContext] = None,
     progress: ProgressCallback = None,
     verify_ssl: bool = True,
@@ -1911,6 +2951,7 @@ def build_result_rows(
                     timeout=timeout,
                     skip_probe=skip_probe,
                     headers=headers,
+                    header_origin_url=header_origin_url,
                     execution=execution,
                     verify_ssl=verify_ssl,
                     proxy_url=proxy_url,
@@ -1937,6 +2978,7 @@ def build_result_rows(
             timeout,
             skip_probe,
             headers,
+            header_origin_url,
             execution,
             verify_ssl,
             proxy_url,
@@ -2086,7 +3128,7 @@ def apply_recursive_metadata(
     enriched = dict(result)
     enriched["include_subdomains"] = config.include_subdomains
     enriched["excluded_subdomains"] = list(config.excluded_subdomains)
-    enriched["proxy_url"] = config.proxy_url
+    enriched["proxy_url"] = redact_url_credentials(config.proxy_url)
     enriched["recursive_enabled"] = config.recursive_scan
     enriched["recursive_depth"] = config.recursive_depth if config.recursive_scan else 0
     enriched["recursive_scanned_targets"] = list(state.scanned_target_urls)
@@ -2098,6 +3140,7 @@ def apply_recursive_metadata(
         "pages": state.skipped_page_duplicates,
         "apis": state.skipped_api_duplicates,
         "targets": state.skipped_target_duplicates,
+        "dynamic_limit": state.skipped_dynamic_recursive_limit,
     }
     enriched["recursive_scan_records"] = list(scan_records)
     return enriched
@@ -2115,6 +3158,7 @@ def combine_recursive_scan_results(
     combined_pages_raw: List[dict] = []
     combined_apis_raw: List[dict] = []
     combined_hardcoded_raw: List[dict] = []
+    combined_dynamic_raw: List[dict] = []
     scan_records: List[dict] = []
 
     for target_url, depth, result in successful_results:
@@ -2123,6 +3167,8 @@ def combine_recursive_scan_results(
         combined_pages_raw.extend(result.get("all_pages", []))
         combined_apis_raw.extend(result.get("all_apis", []))
         combined_hardcoded_raw.extend(result.get("hardcoded_findings", []) or [])
+        if result.get("dynamic_analysis"):
+            combined_dynamic_raw.append(result.get("dynamic_analysis") or {})
         scan_records.append(
             {
                 "target_url": target_url,
@@ -2154,6 +3200,7 @@ def combine_recursive_scan_results(
 
     merged = {
         "input_url": root_url,
+        "final_url": successful_results[0][2].get("final_url", root_url),
         "scanned_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "origin": get_origin_key(root_url),
         "probe_skipped": config.skip_probe,
@@ -2163,7 +3210,36 @@ def combine_recursive_scan_results(
         "max_depth": config.max_depth,
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
-        "proxy_url": config.proxy_url,
+        "proxy_url": redact_url_credentials(config.proxy_url),
+        "dynamic_analysis_enabled": config.dynamic_analysis,
+        "dynamic_wait": config.dynamic_wait,
+        "dynamic_max_events": config.dynamic_max_events,
+        "dynamic_collect_script_bodies": config.dynamic_collect_script_bodies,
+        "dynamic_script_body_limit": config.dynamic_script_body_limit,
+        "dynamic_action_scan": config.dynamic_action_scan,
+        "dynamic_action_limit": config.dynamic_action_limit,
+        "dynamic_scroll_steps": config.dynamic_scroll_steps,
+        "dynamic_recursive_limit": config.dynamic_recursive_limit,
+        "dynamic_analysis": combined_dynamic_raw[0] if len(combined_dynamic_raw) == 1 else {
+            "enabled": config.dynamic_analysis,
+            "success": any(item.get("success") for item in combined_dynamic_raw),
+            "results": combined_dynamic_raw,
+            "events": [event for item in combined_dynamic_raw for event in (item.get("events", []) or [])],
+            "script_response_urls": sorted({url for item in combined_dynamic_raw for url in (item.get("script_response_urls", []) or [])}),
+            "script_response_count": sum(int(item.get("script_response_count", 0) or 0) for item in combined_dynamic_raw),
+            "script_body_bytes": sum(int(item.get("script_body_bytes", 0) or 0) for item in combined_dynamic_raw),
+            "http_request_count": sum(int(item.get("http_request_count", 0) or 0) for item in combined_dynamic_raw),
+            "http_response_body_count": sum(int(item.get("http_response_body_count", 0) or 0) for item in combined_dynamic_raw),
+            "http_body_bytes": sum(int(item.get("http_body_bytes", 0) or 0) for item in combined_dynamic_raw),
+            "blocked_request_count": sum(int(item.get("blocked_request_count", 0) or 0) for item in combined_dynamic_raw),
+            "blocked_request_urls": sorted({url for item in combined_dynamic_raw for url in (item.get("blocked_request_urls", []) or [])}),
+            "actions": [action for item in combined_dynamic_raw for action in (item.get("actions", []) or [])],
+            "action_count": sum(int(item.get("action_count", 0) or 0) for item in combined_dynamic_raw),
+            "spa_urls": sorted({url for item in combined_dynamic_raw for url in (item.get("spa_urls", []) or [])}),
+            "candidate_count": sum(int(item.get("candidate_count", 0) or 0) for item in combined_dynamic_raw),
+            "api_candidate_count": sum(int(item.get("api_candidate_count", 0) or 0) for item in combined_dynamic_raw),
+            "page_candidate_count": sum(int(item.get("page_candidate_count", 0) or 0) for item in combined_dynamic_raw),
+        },
         "js_output_dir": str(normalize_js_output_dir(config.js_output_dir) or ""),
         "js_files": combined_js,
         "accessible_pages": [item for item in combined_pages if item.get("accessible") is True],
@@ -2179,6 +3255,18 @@ def combine_recursive_scan_results(
             "js_discovered": len(combined_discovered_js_urls),
             "js_fetched": len(combined_js),
             "js_saved": sum(1 for item in combined_js if item.get("saved_path")),
+            "dynamic_events": sum(len(item.get("events", []) or []) for item in combined_dynamic_raw),
+            "dynamic_candidates": sum(int(item.get("candidate_count", 0) or 0) for item in combined_dynamic_raw),
+            "dynamic_api_candidates": sum(int(item.get("api_candidate_count", 0) or 0) for item in combined_dynamic_raw),
+            "dynamic_page_candidates": sum(int(item.get("page_candidate_count", 0) or 0) for item in combined_dynamic_raw),
+            "dynamic_script_responses": sum(int(item.get("script_response_count", 0) or 0) for item in combined_dynamic_raw),
+            "dynamic_script_body_bytes": sum(int(item.get("script_body_bytes", 0) or 0) for item in combined_dynamic_raw),
+            "dynamic_http_requests": sum(int(item.get("http_request_count", 0) or 0) for item in combined_dynamic_raw),
+            "dynamic_http_response_bodies": sum(int(item.get("http_response_body_count", 0) or 0) for item in combined_dynamic_raw),
+            "dynamic_http_body_bytes": sum(int(item.get("http_body_bytes", 0) or 0) for item in combined_dynamic_raw),
+            "dynamic_blocked_requests": sum(int(item.get("blocked_request_count", 0) or 0) for item in combined_dynamic_raw),
+            "dynamic_actions": sum(int(item.get("action_count", 0) or 0) for item in combined_dynamic_raw),
+            "dynamic_spa_urls": sum(len(item.get("spa_urls", []) or []) for item in combined_dynamic_raw),
             "page_count": len(combined_pages),
             "api_count": len(combined_apis),
             **combined_hardcoded_summary_fields,
@@ -2200,26 +3288,40 @@ def _discover_once(
 
     root_url = target_url
     root_origin = get_origin_key(root_url)
-    scope = build_url_scope(
-        root_url,
-        include_subdomains=config.include_subdomains,
-        excluded_hostnames=config.excluded_subdomains,
-    )
 
     emit_progress(progress, f"시작 문서를 가져오는 중: {root_url}")
     html_fetch_kwargs = {
         "timeout": config.timeout,
         "method": "GET",
-        "headers": config.headers,
+        "headers": request_headers_for_target(config.headers, config.url, root_url),
         "execution": execution,
         "verify_ssl": config.verify_ssl,
     }
     if config.proxy_url:
         html_fetch_kwargs["proxy_url"] = config.proxy_url
-    html_result = fetch_text(root_url, **html_fetch_kwargs)
+    _initial_fetch_retries = 2
+    html_result = None
+    for _attempt in range(1 + _initial_fetch_retries):
+        ensure_not_cancelled(execution)
+        html_result = fetch_text(root_url, **html_fetch_kwargs)
+        if html_result.success:
+            break
+        if _attempt < _initial_fetch_retries:
+            emit_progress(progress, f"시작 페이지 재시도 ({_attempt + 1}/{_initial_fetch_retries}): {format_fetch_failure(html_result, config.verify_ssl)}")
+            wait_with_cancellation(1.5, execution)
     if not html_result.success:
-        raise RuntimeError(f"시작 페이지를 가져오지 못했습니다: {html_result.url} / {html_result.error or html_result.status_code}")
+        raise RuntimeError(
+            f"시작 페이지를 가져오지 못했습니다: {html_result.url} / "
+            f"{format_fetch_failure(html_result, config.verify_ssl)} "
+            f"(타임아웃: {config.timeout}초 — 느린 서버의 경우 GUI/CLI에서 값을 높여주세요)"
+        )
 
+    document_url = html_result.final_url or root_url
+    scope = build_url_scope(
+        document_url,
+        include_subdomains=config.include_subdomains,
+        excluded_hostnames=config.excluded_subdomains,
+    )
     page_bucket: Dict[str, Candidate] = {}
     api_bucket: Dict[str, Candidate] = {}
     discovered_js_urls: Set[str] = set()
@@ -2228,11 +3330,25 @@ def _discover_once(
     hardcoded_findings: List[dict] = []
     hardcoded_dedupe_keys: Set[Tuple[str, str, str, str, int, int]] = set()
     successful_js_fetches = 0
+    attempted_js_fetches = 0
     saved_js_files = 0
+    dynamic_result = {
+        "enabled": config.dynamic_analysis,
+        "success": False,
+        "events": [],
+        "dom_urls": [],
+        "script_urls": [],
+        "blocked_request_count": 0,
+        "blocked_request_urls": [],
+        "candidate_count": 0,
+        "api_candidate_count": 0,
+        "page_candidate_count": 0,
+        "error": "",
+    }
     js_output_dir = normalize_js_output_dir(config.js_output_dir)
     queue: Deque[Tuple[str, int]] = deque()
 
-    script_urls, inline_scripts = extract_html_assets(html_result.text, root_url, scope)
+    script_urls, inline_scripts = extract_html_assets(html_result.text, document_url, scope)
     emit_progress(progress, f"연결된 스크립트 {len(script_urls)}개와 인라인 스크립트 {len(inline_scripts)}개를 찾았습니다.")
     for script_url in script_urls:
         discovered_js_urls.add(script_url)
@@ -2243,26 +3359,26 @@ def _discover_once(
 
     collect_path_candidates(
         text=html_result.text,
-        base_url=root_url,
-        source_label=f"html:{root_url}",
+        base_url=document_url,
+        source_label=f"html:{document_url}",
         scope=scope,
         page_bucket=page_bucket,
         api_bucket=api_bucket,
     )
     collect_hardcoded_findings(
         text=html_result.text,
-        source_url=root_url,
-        source_label=f"html:{root_url}",
+        source_url=document_url,
+        source_label=f"html:{document_url}",
         source_type="html",
         findings=hardcoded_findings,
         dedupe_keys=hardcoded_dedupe_keys,
     )
 
     for inline_index, inline_script in enumerate(inline_scripts, start=1):
-        inline_source_label = f"inline-script:{root_url}#{inline_index}"
+        inline_source_label = f"inline-script:{document_url}#{inline_index}"
         collect_path_candidates(
             text=inline_script,
-            base_url=root_url,
+            base_url=document_url,
             source_label=inline_source_label,
             scope=scope,
             page_bucket=page_bucket,
@@ -2270,14 +3386,36 @@ def _discover_once(
         )
         collect_hardcoded_findings(
             text=inline_script,
-            source_url=root_url,
+            source_url=document_url,
             source_label=inline_source_label,
             source_type="inline_script",
             findings=hardcoded_findings,
             dedupe_keys=hardcoded_dedupe_keys,
         )
 
-    while queue and successful_js_fetches < config.max_js_files:
+    if config.dynamic_analysis:
+        dynamic_result = collect_dynamic_candidates_with_playwright(
+            url=root_url,
+            scope=scope,
+            config=config,
+            page_bucket=page_bucket,
+            api_bucket=api_bucket,
+            hardcoded_findings=hardcoded_findings,
+            hardcoded_dedupe_keys=hardcoded_dedupe_keys,
+            execution=execution,
+            progress=progress,
+        )
+        for script_url in dynamic_result.get("script_urls", []):
+            script_url = str(script_url)
+            if not should_follow_js(script_url) or not url_matches_scope(script_url, scope):
+                continue
+            discovered_js_urls.add(script_url)
+            if script_url in state.known_js_urls:
+                state.skipped_js_duplicates += 1
+                continue
+            queue.append((script_url, 0))
+
+    while queue and attempted_js_fetches < config.max_js_files:
         ensure_not_cancelled(execution)
         script_url, depth = queue.popleft()
         if depth > config.max_depth or script_url in visited_scripts:
@@ -2287,11 +3425,12 @@ def _discover_once(
             continue
 
         visited_scripts.add(script_url)
-        emit_progress(progress, f"JS 가져오는 중 {successful_js_fetches + 1}/{config.max_js_files}: {script_url}")
+        attempted_js_fetches += 1
+        emit_progress(progress, f"JS 가져오는 중 {attempted_js_fetches}/{config.max_js_files}: {script_url}")
         js_fetch_kwargs = {
             "timeout": config.timeout,
             "method": "GET",
-            "headers": config.headers,
+            "headers": request_headers_for_target(config.headers, config.url, script_url),
             "execution": execution,
             "verify_ssl": config.verify_ssl,
         }
@@ -2300,6 +3439,7 @@ def _discover_once(
         js_result = fetch_text(script_url, **js_fetch_kwargs)
         script_record = {
             "url": script_url,
+            "final_url": js_result.final_url or script_url,
             "depth": depth,
             "status_code": js_result.status_code,
             "success": js_result.success,
@@ -2313,6 +3453,7 @@ def _discover_once(
         # later recursive targets can retry transient failures.
         if js_result.success:
             state.known_js_urls.add(script_url)
+            state.known_js_urls.add(js_result.final_url or script_url)
             successful_js_fetches += 1
             if js_output_dir is not None:
                 try:
@@ -2330,24 +3471,25 @@ def _discover_once(
         if not js_result.success or not js_result.text:
             continue
 
+        script_base_url = js_result.final_url or script_url
         collect_path_candidates(
             text=js_result.text,
-            base_url=script_url,
-            source_label=f"js:{script_url}",
+            base_url=script_base_url,
+            source_label=f"js:{script_base_url}",
             scope=scope,
             page_bucket=page_bucket,
             api_bucket=api_bucket,
         )
         collect_hardcoded_findings(
             text=js_result.text,
-            source_url=script_url,
-            source_label=f"js:{script_url}",
+            source_url=script_base_url,
+            source_label=f"js:{script_base_url}",
             source_type="js",
             findings=hardcoded_findings,
             dedupe_keys=hardcoded_dedupe_keys,
         )
 
-        for child_url in extract_additional_js_urls(js_result.text, script_url, scope):
+        for child_url in extract_additional_js_urls(js_result.text, script_base_url, scope):
             discovered_js_urls.add(child_url)
             if child_url in state.known_js_urls:
                 state.skipped_js_duplicates += 1
@@ -2368,6 +3510,7 @@ def _discover_once(
         timeout=config.timeout,
         skip_probe=config.skip_probe,
         headers=config.headers,
+        header_origin_url=config.url,
         execution=execution,
         progress=progress,
         verify_ssl=config.verify_ssl,
@@ -2382,6 +3525,7 @@ def _discover_once(
         timeout=config.timeout,
         skip_probe=config.skip_probe,
         headers=config.headers,
+        header_origin_url=config.url,
         execution=execution,
         progress=progress,
         verify_ssl=config.verify_ssl,
@@ -2404,6 +3548,7 @@ def _discover_once(
 
     return {
         "input_url": root_url,
+        "final_url": document_url,
         "scanned_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "origin": root_origin,
         "probe_skipped": config.skip_probe,
@@ -2411,7 +3556,17 @@ def _discover_once(
         "max_depth": config.max_depth,
         "max_workers": config.max_workers,
         "request_delay": config.request_delay,
-        "proxy_url": config.proxy_url,
+        "proxy_url": redact_url_credentials(config.proxy_url),
+        "dynamic_analysis": dynamic_result,
+        "dynamic_analysis_enabled": config.dynamic_analysis,
+        "dynamic_wait": config.dynamic_wait,
+        "dynamic_max_events": config.dynamic_max_events,
+        "dynamic_collect_script_bodies": config.dynamic_collect_script_bodies,
+        "dynamic_script_body_limit": config.dynamic_script_body_limit,
+        "dynamic_action_scan": config.dynamic_action_scan,
+        "dynamic_action_limit": config.dynamic_action_limit,
+        "dynamic_scroll_steps": config.dynamic_scroll_steps,
+        "dynamic_recursive_limit": config.dynamic_recursive_limit,
         "js_output_dir": str(js_output_dir or ""),
         "js_files": sorted(fetched_scripts, key=lambda item: (item["depth"], item["url"])),
         "js_discovered_urls": sorted(discovered_js_urls),
@@ -2427,6 +3582,18 @@ def _discover_once(
             "js_discovered": len(discovered_js_urls),
             "js_fetched": len(fetched_scripts),
             "js_saved": saved_js_files,
+            "dynamic_events": len(dynamic_result.get("events", []) or []),
+            "dynamic_candidates": int(dynamic_result.get("candidate_count", 0) or 0),
+            "dynamic_api_candidates": int(dynamic_result.get("api_candidate_count", 0) or 0),
+            "dynamic_page_candidates": int(dynamic_result.get("page_candidate_count", 0) or 0),
+            "dynamic_script_responses": int(dynamic_result.get("script_response_count", 0) or 0),
+            "dynamic_script_body_bytes": int(dynamic_result.get("script_body_bytes", 0) or 0),
+            "dynamic_http_requests": int(dynamic_result.get("http_request_count", 0) or 0),
+            "dynamic_http_response_bodies": int(dynamic_result.get("http_response_body_count", 0) or 0),
+            "dynamic_http_body_bytes": int(dynamic_result.get("http_body_bytes", 0) or 0),
+            "dynamic_blocked_requests": int(dynamic_result.get("blocked_request_count", 0) or 0),
+            "dynamic_actions": int(dynamic_result.get("action_count", 0) or 0),
+            "dynamic_spa_urls": len(dynamic_result.get("spa_urls", []) or []),
             "page_count": len(all_pages),
             "api_count": len(all_apis),
             **hardcoded_summary_fields,
@@ -2450,6 +3617,7 @@ def discover(config: Config, progress: ProgressCallback = None, execution: Optio
     queue: Deque[Tuple[str, int]] = deque([(config.url, 0)])
     successful_results: List[Tuple[str, int, dict]] = []
     failed_targets: List[dict] = []
+    dynamic_recursive_enqueued = 0
 
     while queue:
         ensure_not_cancelled(execution_context)
@@ -2475,6 +3643,12 @@ def discover(config: Config, progress: ProgressCallback = None, execution: Optio
         try:
             result = _discover_once(config, target_url, state, execution=execution_context, progress=scan_progress)
             successful_results.append((target_url, depth, result))
+            if depth == 0 and result.get("final_url"):
+                recursive_scope = build_url_scope(
+                    str(result["final_url"]),
+                    include_subdomains=config.include_subdomains,
+                    excluded_hostnames=config.excluded_subdomains,
+                )
             emit_progress(progress, f"대상 스캔 완료 ({depth}단계): {target_url}")
         except ScanCancelled:
             raise
@@ -2501,6 +3675,13 @@ def discover(config: Config, progress: ProgressCallback = None, execution: Optio
                 state.skipped_target_duplicates += 1
                 continue
 
+            if result_row_has_dynamic_source(item):
+                if dynamic_recursive_enqueued >= config.dynamic_recursive_limit:
+                    state.skipped_dynamic_recursive_limit += 1
+                    emit_progress(progress, f"동적 재귀 대상 한도 초과로 제외: {next_url}")
+                    continue
+                dynamic_recursive_enqueued += 1
+
             state.discovered_target_paths.add(next_path)
             state.discovered_target_urls.append(next_url)
             queue.append((next_url, depth + 1))
@@ -2521,23 +3702,11 @@ def discover_many(config: Config, urls: List[str], progress: ProgressCallback = 
     for index, url in enumerate(urls, start=1):
         ensure_not_cancelled(execution_context)
         emit_progress(progress, f"URL {index}/{total} 스캔 시작: {url}")
-        per_url_config = Config(
+        per_url_config = replace(
+            config,
             url=url,
-            max_js_files=config.max_js_files,
-            max_depth=config.max_depth,
-            timeout=config.timeout,
-            output=config.output,
-            skip_probe=config.skip_probe,
-            recursive_scan=config.recursive_scan,
-            recursive_depth=config.recursive_depth,
-            include_subdomains=config.include_subdomains,
             excluded_subdomains=tuple(config.excluded_subdomains),
-            max_workers=config.max_workers,
-            request_delay=config.request_delay,
             headers=dict(config.headers),
-            verify_ssl=config.verify_ssl,
-            proxy_url=config.proxy_url,
-            js_output_dir=config.js_output_dir,
         )
         try:
             result = discover(
@@ -2618,6 +3787,7 @@ def build_single_workbook_sheets(result: dict, output_path: Path) -> List[SheetS
     return [
         SheetSpec("요약", [[line] for line in build_summary_lines(result, output_path)]),
         SheetSpec("JS 파일", build_js_sheet_rows(result.get("js_files", []))),
+        SheetSpec("동적 분석", build_dynamic_sheet_rows(result.get("dynamic_analysis") or {})),
         SheetSpec("페이지", build_result_sheet_rows(result.get("all_pages", []))),
         SheetSpec("API", build_result_sheet_rows(result.get("all_apis", []))),
         SheetSpec("민감정보", build_hardcoded_sheet_rows(findings)),
@@ -2665,6 +3835,15 @@ def build_batch_summary_lines(batch_result: dict, output_path: Path | str) -> Li
         f"JS 파일 합계: {summary['js_fetched']}",
         f"저장한 JS 파일 합계: {int(summary.get('js_saved', 0) or 0)}",
         f"JS 저장 폴더: {batch_result.get('js_output_dir') or '-'}",
+        f"동적 분석: {'사용' if batch_result.get('dynamic_analysis_enabled') else '미사용'}",
+        f"동적 네트워크 이벤트 합계: {int(summary.get('dynamic_events', 0) or 0)}",
+        f"동적 HTTP 요청 분석 합계: {int(summary.get('dynamic_http_requests', 0) or 0)}",
+        f"동적 HTTP 본문 분석 합계: {int(summary.get('dynamic_http_response_bodies', 0) or 0)}",
+        f"동적 사설 주소 요청 차단 합계: {int(summary.get('dynamic_blocked_requests', 0) or 0)}",
+        f"동적 후보 합계: {int(summary.get('dynamic_candidates', 0) or 0)}",
+        f"동적 JS 응답 분석 합계: {int(summary.get('dynamic_script_responses', 0) or 0)}",
+        f"동적 액션 클릭 합계: {int(summary.get('dynamic_actions', 0) or 0)}",
+        f"SPA 라우터 URL 합계: {int(summary.get('dynamic_spa_urls', 0) or 0)}",
         f"페이지 후보 합계: {summary['page_count']}",
         f"API 후보 합계: {summary['api_count']}",
         f"민감정보 탐지 합계: {hardcoded_total}",
@@ -2685,7 +3864,8 @@ def build_batch_summary_lines(batch_result: dict, output_path: Path | str) -> Li
         f"{int(dedupe.get('js', 0) or 0)}/"
         f"{int(dedupe.get('pages', 0) or 0)}/"
         f"{int(dedupe.get('apis', 0) or 0)}/"
-        f"{int(dedupe.get('targets', 0) or 0)}",
+        f"{int(dedupe.get('targets', 0) or 0)}"
+        f" (동적 한도 제외 {int(dedupe.get('dynamic_limit', 0) or 0)})",
     ]
     return lines
 
@@ -2730,6 +3910,9 @@ def build_record_detail_sheet_rows(record: dict, output_path: Path | str) -> Lis
     rows.append(["=== JS 파일 ==="])
     rows.extend(build_js_sheet_rows(record.get("js_files", [])))
     rows.extend([[]])
+    rows.append(["=== 동적 분석 ==="])
+    rows.extend(build_dynamic_sheet_rows(record.get("dynamic_analysis") or {}))
+    rows.extend([[]])
     rows.append(["=== 페이지 ==="])
     rows.extend(build_result_sheet_rows(record.get("all_pages", [])))
     rows.extend([[]])
@@ -2752,6 +3935,9 @@ def build_record_group_sheet_rows(records: List[dict], output_path: Path | str, 
         rows.append([])
         rows.append(["=== JS 파일 ==="])
         rows.extend(build_js_sheet_rows(record.get("js_files", [])))
+        rows.append([])
+        rows.append(["=== 동적 분석 ==="])
+        rows.extend(build_dynamic_sheet_rows(record.get("dynamic_analysis") or {}))
         rows.append([])
         rows.append(["=== 페이지 ==="])
         rows.extend(build_result_sheet_rows(record.get("all_pages", [])))
@@ -2779,6 +3965,39 @@ def build_js_sheet_rows(js_files: List[dict]) -> List[List[object]]:
                 item.get("url", ""),
             ]
         )
+    return rows
+
+
+def build_dynamic_sheet_rows(dynamic_result: dict) -> List[List[object]]:
+    rows: List[List[object]] = [["유형", "상태", "방법/동작", "리소스/역할", "콘텐츠/텍스트", "URL"]]
+    for item in dynamic_result.get("events", []) or []:
+        rows.append(
+            [
+                "network",
+                item.get("status_code", "-"),
+                item.get("method", "") or "",
+                item.get("resource_type", "") or "",
+                (item.get("content_type", "") or "") + (" / body" if item.get("body_analyzed") else ""),
+                item.get("url", "") or "",
+            ]
+        )
+    for item in dynamic_result.get("actions", []) or []:
+        rows.append(
+            [
+                "action",
+                "error" if item.get("error") else "ok",
+                item.get("kind", "") or "",
+                item.get("role", "") or item.get("tag", "") or "",
+                item.get("text", "") or item.get("error", "") or "",
+                item.get("after_url", "") or item.get("href", "") or "",
+            ]
+        )
+    for url in dynamic_result.get("spa_urls", []) or []:
+        rows.append(["spa", "-", "history", "-", "-", url])
+    for url in dynamic_result.get("blocked_request_urls", []) or []:
+        rows.append(["blocked", "-", "request", "private-host", "-", url])
+    if len(rows) == 1:
+        rows.append(["-", "-", "-", "-", "-", dynamic_result.get("error", "") or ""])
     return rows
 
 
@@ -3204,6 +4423,15 @@ def build_summary_lines(result: dict, output_path: Path | str, language: str = "
             f"{_localized_text(language, '가져온 JS 파일 수', 'Fetched JS files')}: {summary['js_fetched']}",
             f"{_localized_text(language, '저장한 JS 파일 수', 'Saved JS files')}: {int(summary.get('js_saved', 0) or 0)}",
             f"{_localized_text(language, 'JS 저장 폴더', 'JS output directory')}: {result.get('js_output_dir') or '-'}",
+            f"{_localized_text(language, '동적 분석', 'Dynamic analysis')}: {_format_enabled_label(bool(result.get('dynamic_analysis_enabled')), language)}",
+            f"{_localized_text(language, '동적 네트워크 이벤트', 'Dynamic network events')}: {int(summary.get('dynamic_events', 0) or 0)}",
+            f"{_localized_text(language, '동적 HTTP 요청 분석', 'Dynamic HTTP requests analyzed')}: {int(summary.get('dynamic_http_requests', 0) or 0)}",
+            f"{_localized_text(language, '동적 HTTP 본문 분석', 'Dynamic HTTP bodies analyzed')}: {int(summary.get('dynamic_http_response_bodies', 0) or 0)}",
+            f"{_localized_text(language, '동적 사설 주소 요청 차단', 'Dynamic private-host requests blocked')}: {int(summary.get('dynamic_blocked_requests', 0) or 0)}",
+            f"{_localized_text(language, '동적 후보 수', 'Dynamic candidates')}: {int(summary.get('dynamic_candidates', 0) or 0)}",
+            f"{_localized_text(language, '동적 JS 응답 분석', 'Dynamic JS responses')}: {int(summary.get('dynamic_script_responses', 0) or 0)}",
+            f"{_localized_text(language, '동적 액션 클릭', 'Dynamic action clicks')}: {int(summary.get('dynamic_actions', 0) or 0)}",
+            f"{_localized_text(language, 'SPA 라우터 URL', 'SPA router URLs')}: {int(summary.get('dynamic_spa_urls', 0) or 0)}",
             f"{_localized_text(language, '페이지 후보 수', 'Page candidates')}: {summary['page_count']}",
             f"{_localized_text(language, 'API 후보 수', 'API candidates')}: {summary['api_count']}",
             f"{_localized_text(language, '민감정보 탐지 수', 'Hardcoded findings')}: {hardcoded_total}",
@@ -3230,6 +4458,7 @@ def build_summary_lines(result: dict, output_path: Path | str, language: str = "
         f"{int(dedupe.get('pages', 0) or 0)}/"
         f"{int(dedupe.get('apis', 0) or 0)}/"
         f"{int(dedupe.get('targets', 0) or 0)}"
+        f" ({_localized_text(language, '동적 한도 제외', 'dynamic limit skipped')} {int(dedupe.get('dynamic_limit', 0) or 0)})"
     )
     if result["accessible_pages"]:
         lines.append("")
@@ -3344,6 +4573,7 @@ def _build_result_metric_cards(result: dict) -> str:
     findings = resolve_sensitive_findings(result)
     metrics = [
         ("JS Files", summary.get("js_fetched", 0)),
+        ("Dynamic", summary.get("dynamic_events", 0)),
         ("Pages", summary.get("page_count", 0)),
         ("APIs", summary.get("api_count", 0)),
         ("Sensitive", summary_count(summary, "hardcoded_total", "sensitive_total", default=len(findings))),
@@ -3360,6 +4590,7 @@ def _build_batch_metric_cards(batch_result: dict) -> str:
         ("Success", summary.get("success_count", batch_result.get("success_count", 0))),
         ("Failed", summary.get("failed_count", batch_result.get("failed_count", 0))),
         ("JS Files", summary.get("js_fetched", 0)),
+        ("Dynamic", summary.get("dynamic_events", 0)),
         ("Pages", summary.get("page_count", 0)),
         ("APIs", summary.get("api_count", 0)),
     ]
@@ -3541,6 +4772,10 @@ def _build_single_html_section(result: dict, output_label: Path | str, *, includ
         f"{_build_html_table(build_js_sheet_rows(result.get('js_files', [])))}"
         "</div>"
         '<div class="panel inset-panel">'
+        "<h3>Dynamic Analysis</h3>"
+        f"{_build_html_table(build_dynamic_sheet_rows(result.get('dynamic_analysis') or {}))}"
+        "</div>"
+        '<div class="panel inset-panel">'
         "<h3>Pages</h3>"
         f"{_build_html_table(build_result_sheet_rows(result.get('all_pages', [])))}"
         "</div>"
@@ -3574,7 +4809,7 @@ def _build_single_html_section(result: dict, output_label: Path | str, *, includ
         f"{_build_html_resource_preview('Accessible APIs', accessible_apis, 'No accessible APIs were confirmed.')}"
         f"{_build_html_sensitive_preview(findings)}"
         "</div>"
-        f"{_build_html_detail_block('Detailed Tables', detail_body, f'{anchor_base}-details', note='JS / Pages / APIs / Sensitive', open_by_default=not include_title)}"
+        f"{_build_html_detail_block('Detailed Tables', detail_body, f'{anchor_base}-details', note='JS / Dynamic / Pages / APIs / Sensitive', open_by_default=not include_title)}"
         "</section>"
     )
 

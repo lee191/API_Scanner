@@ -19,6 +19,7 @@ from route_api_discovery import (
     ScanCancelled,
     build_execution_context,
     discover_many,
+    parse_header_entry,
     parse_header_lines,
     parse_hostname_filters,
     parse_input_urls,
@@ -80,6 +81,7 @@ KO: Dict[str, str] = {
     "col_name": "이름", "col_value": "값",
     "add": "추가", "edit": "편집", "remove": "삭제", "import_": "가져오기",
     "scan_options": "스캔 옵션",
+    "browser_options": "브라우저 분석",
     "recursive_scan": "재귀 스캔",
     "include_subdomains": "서브도메인",
     "skip_probe": "프로브 생략",
@@ -107,6 +109,20 @@ KO: Dict[str, str] = {
     "col_source": "출처", "col_status": "상태 코드",
     "col_params": "파라미터", "col_sensitive": "민감정보",
     "col_severity": "심각도", "col_ctype": "콘텐츠 유형",
+    "col_accessible": "접근",
+    "col_length": "길이",
+    "col_url": "URL",
+    "col_saved_path": "저장 경로",
+    "col_error": "오류",
+    "col_depth": "깊이",
+    "col_success": "성공",
+    "col_category": "범주",
+    "col_field": "필드",
+    "col_value": "값",
+    "col_confidence": "신뢰도",
+    "col_location": "위치",
+    "col_matched_by": "탐지 방식",
+    "col_context": "컨텍스트",
     "log": "실행 로그", "col_ts": "시간", "col_msg": "메시지",
     "clear": "지우기", "save_log": "로그 저장",
     "language": "언어",
@@ -155,6 +171,7 @@ EN: Dict[str, str] = {**KO,
     "col_name": "Name", "col_value": "Value",
     "add": "Add", "edit": "Edit", "remove": "Remove", "import_": "Import",
     "scan_options": "Scan Options",
+    "browser_options": "Browser Analysis",
     "recursive_scan": "Recursive Scan",
     "include_subdomains": "Subdomains",
     "skip_probe": "Skip Probe",
@@ -179,6 +196,20 @@ EN: Dict[str, str] = {**KO,
     "col_source": "Source", "col_status": "Status Code",
     "col_params": "Parameters", "col_sensitive": "Sensitive",
     "col_severity": "Severity", "col_ctype": "Content Type",
+    "col_accessible": "Accessible",
+    "col_length": "Length",
+    "col_url": "URL",
+    "col_saved_path": "Saved Path",
+    "col_error": "Error",
+    "col_depth": "Depth",
+    "col_success": "Success",
+    "col_category": "Category",
+    "col_field": "Field",
+    "col_value": "Value",
+    "col_confidence": "Confidence",
+    "col_location": "Location",
+    "col_matched_by": "Matched By",
+    "col_context": "Context",
     "log": "Log", "col_ts": "Timestamp", "col_msg": "Message",
     "clear": "Clear", "save_log": "Save Log",
     "language": "Language",
@@ -234,6 +265,26 @@ EN.update({
     "filetype_log": "Log files",
     "filetype_all": "All files",
     "save_log_error_title": "Save log failed",
+})
+KO.update({
+    "dynamic_analysis": "브라우저로 열어보기",
+    "dynamic_actions": "스크롤/클릭 허용 (주의)",
+    "dynamic_wait": "화면 로딩 대기(초)",
+    "dynamic_events": "저장할 요청 수",
+    "dynamic_action_limit": "클릭할 최대 수",
+    "dynamic_scroll_steps": "스크롤 횟수",
+    "dynamic_recursive_limit": "추가 방문 페이지 수",
+    "dynamic_script_body_limit": "JS 분석 크기 제한",
+})
+EN.update({
+    "dynamic_analysis": "Open in Browser",
+    "dynamic_actions": "Allow Scrolls/Clicks (Caution)",
+    "dynamic_wait": "Wait After Load (s)",
+    "dynamic_events": "Requests to Save",
+    "dynamic_action_limit": "Max Clicks",
+    "dynamic_scroll_steps": "Scroll Count",
+    "dynamic_recursive_limit": "Extra Pages to Visit",
+    "dynamic_script_body_limit": "JS Analyze Size Limit",
 })
 
 
@@ -362,12 +413,20 @@ class CtkDiscoveryApp(ctk.CTk):
         self._subdomain_var   = tk.BooleanVar(value=True)
         self._skip_probe_var  = tk.BooleanVar(value=False)
         self._verify_ssl_var  = tk.BooleanVar(value=True)
+        self._dynamic_var     = tk.BooleanVar(value=False)
+        self._dynamic_actions_var = tk.BooleanVar(value=False)
         self._max_js_var      = tk.IntVar(value=50)
         self._max_depth_var   = tk.IntVar(value=2)
         self._max_workers_var = tk.IntVar(value=8)
-        self._timeout_var     = tk.DoubleVar(value=10.0)
+        self._timeout_var     = tk.DoubleVar(value=15.0)
         self._delay_var       = tk.DoubleVar(value=0.0)
         self._rec_depth_var   = tk.IntVar(value=1)
+        self._dyn_wait_var    = tk.DoubleVar(value=3.0)
+        self._dyn_events_var  = tk.IntVar(value=300)
+        self._dyn_action_limit_var = tk.IntVar(value=12)
+        self._dyn_scroll_steps_var = tk.IntVar(value=3)
+        self._dyn_recursive_limit_var = tk.IntVar(value=50)
+        self._dyn_script_body_limit_var = tk.IntVar(value=1048576)
         self._proxy_var       = tk.StringVar(value="")
         self._excl_var        = tk.StringVar(value="")
         self._jsdir_var       = tk.StringVar(value=initial_js_output_dir or "")
@@ -556,6 +615,8 @@ class CtkDiscoveryApp(ctk.CTk):
         r = self._left_card_headers(scroll, r)
         # Scan options
         r = self._left_card_scan_options(scroll, r)
+        # Browser analysis
+        r = self._left_card_browser_options(scroll, r)
         # Advanced options
         r = self._left_card_advanced(scroll, r)
 
@@ -663,6 +724,32 @@ class CtkDiscoveryApp(ctk.CTk):
             self._ui[f"hdr_{key}_btn"] = b
         return row + 1
 
+    def _add_spin_grid(self, parent: tk.Frame, specs: List[Tuple[str, tk.Variable, float, float, bool]], columns: int = 2) -> None:
+        p = _pal()
+        grid = tk.Frame(parent, bg=p["surface"])
+        grid.grid(row=parent.grid_size()[1], column=0, sticky="ew", pady=(2, 0))
+        for i, (key, var, mn, mx, fl) in enumerate(specs):
+            col = i % columns
+            sub_r = i // columns
+            sub = tk.Frame(grid, bg=p["surface"])
+            sub.grid(row=sub_r, column=col, padx=(0, 12), pady=3, sticky="nw")
+            lbl = tk.Label(sub, text=_t(self._lang, key), bg=p["surface"],
+                           fg=p["text2"], font=("Segoe UI", 10))
+            lbl.pack(anchor="w")
+            self._ui[f"lbl_{key}"] = lbl
+            spin = tk.Spinbox(sub, textvariable=var, from_=mn, to=mx, increment=0.5 if fl else 1,
+                              width=8, font=("Segoe UI", 11),
+                              bg=p["surface2"], fg=p["text"],
+                              relief="flat", highlightthickness=1,
+                              highlightbackground=p["border"],
+                              buttonbackground=p["border2"],
+                              insertbackground=p["text"],
+                              disabledbackground=p["disabled_bg"],
+                              disabledforeground=p["disabled_fg"],
+                              readonlybackground=p["surface2"])
+            spin.pack(anchor="w")
+            self._ui[f"spin_{key}"] = spin
+
     def _left_card_scan_options(self, parent, row: int) -> int:
         p = _pal()
         body, _ = self._section_card(parent, row, "scan_options")
@@ -697,45 +784,52 @@ class CtkDiscoveryApp(ctk.CTk):
             cb.pack(side="left", padx=(0, 14))
             self._ui[f"chk_{key}"] = cb
 
-        # Numeric fields grid (3 per row)
-        num_f = tk.Frame(body, bg=p["surface"])
-        num_f.grid(row=2, column=0, sticky="ew")
-        specs = [
+        self._add_spin_grid(body, [
             ("max_js",       self._max_js_var,      1, 500,  False),
             ("max_depth",    self._max_depth_var,    0,  20,  False),
-            ("max_workers",  self._max_workers_var,  1, 256,  False),
             ("timeout",      self._timeout_var,    1.0, 300.0, True),
-            ("request_delay",self._delay_var,       0.0, 60.0, True),
             ("recursive_depth", self._rec_depth_var, 1,  10,  False),
-        ]
-        for i, (key, var, mn, mx, fl) in enumerate(specs):
-            col = i % 3
-            sub_r = i // 3
-            sub = tk.Frame(num_f, bg=p["surface"])
-            sub.grid(row=sub_r, column=col, padx=(0, 12), pady=2, sticky="nw")
-            lbl = tk.Label(sub, text=_t(self._lang, key), bg=p["surface"],
-                           fg=p["text2"], font=("Segoe UI", 10))
-            lbl.pack(anchor="w")
-            self._ui[f"lbl_{key}"] = lbl
-            inc = 0.5 if fl else 1
-            spin = tk.Spinbox(sub, textvariable=var, from_=mn, to=mx, increment=inc,
-                              width=7, font=("Segoe UI", 11),
-                              bg=p["surface2"], fg=p["text"],
-                              relief="flat", highlightthickness=1,
-                              highlightbackground=p["border"],
-                              buttonbackground=p["border2"],
-                              insertbackground=p["text"],
-                              disabledbackground=p["disabled_bg"],
-                              disabledforeground=p["disabled_fg"],
-                              readonlybackground=p["surface2"])
-            spin.pack(anchor="w")
-            self._ui[f"spin_{key}"] = spin
+        ], columns=2)
 
+        return row + 1
+
+    def _left_card_browser_options(self, parent, row: int) -> int:
+        p = _pal()
+        body, _ = self._section_card(parent, row, "browser_options")
+
+        checks = tk.Frame(body, bg=p["surface"])
+        checks.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        for key, var in [
+            ("dynamic_analysis", self._dynamic_var),
+            ("dynamic_actions", self._dynamic_actions_var),
+        ]:
+            cb = ctk.CTkCheckBox(checks, text=_t(self._lang, key), variable=var,
+                                  font=ctk.CTkFont(size=11), text_color=p["text2"],
+                                  fg_color=p["accent"], hover_color=p["accent_dark"],
+                                  checkmark_color="#FFFFFF", corner_radius=3,
+                                  border_color=p["border2"], border_width=1)
+            cb.pack(side="left", padx=(0, 14))
+            self._ui[f"chk_{key}"] = cb
+
+        self._add_spin_grid(body, [
+            ("dynamic_wait", self._dyn_wait_var, 0.0, 60.0, True),
+            ("dynamic_events", self._dyn_events_var, 1, 5000, False),
+            ("dynamic_action_limit", self._dyn_action_limit_var, 0, 100, False),
+            ("dynamic_scroll_steps", self._dyn_scroll_steps_var, 0, 20, False),
+            ("dynamic_recursive_limit", self._dyn_recursive_limit_var, 0, 1000, False),
+            ("dynamic_script_body_limit", self._dyn_script_body_limit_var, 0, 10485760, False),
+        ], columns=2)
         return row + 1
 
     def _left_card_advanced(self, parent, row: int) -> int:
         p = _pal()
         body, _ = self._section_card(parent, row, "advanced_options")
+        self._add_spin_grid(body, [
+            ("max_workers", self._max_workers_var, 1, 256, False),
+            ("request_delay", self._delay_var, 0.0, 60.0, True),
+        ], columns=2)
+
+        start_row = body.grid_size()[1]
         for i, (key, var, hint) in enumerate([
             ("proxy",       self._proxy_var,  _t(self._lang, "proxy_hint")),
             ("excluded_sub",self._excl_var,   _t(self._lang, "excluded_hint")),
@@ -743,7 +837,7 @@ class CtkDiscoveryApp(ctk.CTk):
         ]):
             lbl = tk.Label(body, text=_t(self._lang, key), bg=p["surface"],
                            fg=p["text2"], font=("Segoe UI", 10), anchor="w")
-            lbl.grid(row=i * 2, column=0, sticky="w", pady=(4 if i else 0, 0))
+            lbl.grid(row=start_row + i * 2, column=0, sticky="w", pady=(8 if i == 0 else 4, 0))
             self._ui[f"lbl_adv_{key}"] = lbl
             ent = ctk.CTkEntry(body, textvariable=var, height=30,
                                font=ctk.CTkFont(size=11),
@@ -751,7 +845,7 @@ class CtkDiscoveryApp(ctk.CTk):
                                border_width=1, text_color=p["text"],
                                placeholder_text=hint,
                                placeholder_text_color=p["subtle"])
-            ent.grid(row=i * 2 + 1, column=0, sticky="ew", pady=(0, 2))
+            ent.grid(row=start_row + i * 2 + 1, column=0, sticky="ew", pady=(0, 2))
             self._ui[f"ent_adv_{key}"] = ent
         return row + 1
 
@@ -930,9 +1024,10 @@ class CtkDiscoveryApp(ctk.CTk):
         outer.grid_rowconfigure(0, weight=1)
         outer.grid_columnconfigure(0, weight=1)
 
-        COLS = ("method","endpoint","source","status","params","sensitive","severity","ctype")
+        COLS = ("method","endpoint","status","accessible","length","source","url")
         self._COLS = COLS
-        COL_WIDTHS = (82, 310, 190, 90, 80, 80, 80, 160)
+        self._active_cols = COLS
+        COL_WIDTHS = (82, 280, 90, 80, 80, 220, 360)
 
         self._ui["tree"] = ttk.Treeview(
             outer, columns=COLS, show="headings",
@@ -1065,7 +1160,7 @@ class CtkDiscoveryApp(ctk.CTk):
             "filter_combo_url_type", "filter_combo_status_code",
         ):
             self._configure_combo_role(key, p)
-        for key in ("recursive_scan", "include_subdomains", "skip_probe", "verify_ssl"):
+        for key in ("recursive_scan", "include_subdomains", "skip_probe", "verify_ssl", "dynamic_analysis", "dynamic_actions"):
             widget = self._ui.get(f"chk_{key}")
             if widget is not None:
                 try:
@@ -1096,7 +1191,12 @@ class CtkDiscoveryApp(ctk.CTk):
             return
         title = _t(self._lang, "empty_title")
         hint = _t(self._lang, "empty_hint")
-        tree.insert("", "end", values=("", title, hint, "", "", "", "", ""), tags=("empty",))
+        values = [""] * len(getattr(self, "_active_cols", self._COLS))
+        if len(values) >= 2:
+            values[1] = title
+        if len(values) >= 3:
+            values[2] = hint
+        tree.insert("", "end", values=tuple(values), tags=("empty",))
 
     def _is_empty_row(self, item_id: str) -> bool:
         return "empty" in self._ui["tree"].item(item_id, "tags")
@@ -1216,7 +1316,7 @@ class CtkDiscoveryApp(ctk.CTk):
         for key in [
             "url_box", "output_entry", "browse_btn",
             "chk_recursive_scan", "chk_include_subdomains",
-            "chk_skip_probe", "chk_verify_ssl",
+            "chk_skip_probe", "chk_verify_ssl", "chk_dynamic_analysis", "chk_dynamic_actions",
             "ent_adv_proxy", "ent_adv_excluded_sub", "ent_adv_js_dir",
             "hdr_add_btn", "hdr_edit_btn", "hdr_remove_btn", "hdr_import__btn",
         ]:
@@ -1229,6 +1329,9 @@ class CtkDiscoveryApp(ctk.CTk):
         for key in [
             "spin_max_js", "spin_max_depth", "spin_max_workers",
             "spin_timeout", "spin_request_delay", "spin_recursive_depth",
+            "spin_dynamic_wait", "spin_dynamic_events",
+            "spin_dynamic_action_limit", "spin_dynamic_scroll_steps",
+            "spin_dynamic_recursive_limit", "spin_dynamic_script_body_limit",
         ]:
             widget = self._ui.get(key)
             if widget is not None:
@@ -1289,15 +1392,10 @@ class CtkDiscoveryApp(ctk.CTk):
             messagebox.showwarning("", _t(self._lang, "already_running"), parent=self)
             return
 
-        url_text = self._ui["url_box"].get("0.0", "end").strip()
-        urls = parse_input_urls(url_text)
-        if not urls:
-            messagebox.showerror(_t(self._lang, "input_error"),
-                                 _t(self._lang, "url_hint"), parent=self)
-            return
-
         output_str = self._ui["output_entry"].get().strip() or "discovery-result"
         try:
+            url_text = self._ui["url_box"].get("0.0", "end").strip()
+            urls = parse_input_urls(url_text)
             excluded = parse_hostname_filters(
                 [s.strip() for s in self._excl_var.get().split(",") if s.strip()]
             )
@@ -1318,6 +1416,14 @@ class CtkDiscoveryApp(ctk.CTk):
                 verify_ssl=self._verify_ssl_var.get(),
                 proxy_url=self._proxy_var.get().strip(),
                 js_output_dir=Path(self._jsdir_var.get()) if self._jsdir_var.get().strip() else None,
+                dynamic_analysis=self._dynamic_var.get(),
+                dynamic_wait=float(self._dyn_wait_var.get()),
+                dynamic_max_events=self._dyn_events_var.get(),
+                dynamic_action_scan=self._dynamic_actions_var.get(),
+                dynamic_action_limit=self._dyn_action_limit_var.get(),
+                dynamic_scroll_steps=self._dyn_scroll_steps_var.get(),
+                dynamic_recursive_limit=self._dyn_recursive_limit_var.get(),
+                dynamic_script_body_limit=self._dyn_script_body_limit_var.get(),
             )
             validate_config(cfg)
         except Exception as exc:
@@ -1523,6 +1629,10 @@ class CtkDiscoveryApp(ctk.CTk):
                 "source":    self._source_text(item),
                 "status":    str(item.get("status_code") or item.get("status") or "-"),
                 "params":    str(item.get("parameters") or item.get("length") or ""),
+                "accessible": "Y" if item.get("accessible") is True else ("N" if item.get("accessible") is False else "-"),
+                "length":    str(item.get("length") or ""),
+                "url":       str(item.get("url") or ""),
+                "error":     str(item.get("probe_error") or item.get("error") or ""),
                 "sensitive": "",
                 "severity":  "",
                 "ctype":     str(item.get("content_type") or ""),
@@ -1535,6 +1645,10 @@ class CtkDiscoveryApp(ctk.CTk):
                 "source":    self._source_text(item),
                 "status":    str(item.get("status_code") or "-"),
                 "params":    str(item.get("length") or ""),
+                "accessible": "Y" if item.get("accessible") is True else ("N" if item.get("accessible") is False else "-"),
+                "length":    str(item.get("length") or ""),
+                "url":       str(item.get("url") or ""),
+                "error":     str(item.get("probe_error") or item.get("error") or ""),
                 "sensitive": "",
                 "severity":  "",
                 "ctype":     "text/html",
@@ -1547,26 +1661,72 @@ class CtkDiscoveryApp(ctk.CTk):
                 "source":    str(item.get("saved_path") or ""),
                 "status":    str(item.get("status_code") or "-"),
                 "params":    str(item.get("length") or ""),
+                "depth":     str(item.get("depth") or "0"),
+                "success":   "Y" if item.get("success") else "N",
+                "length":    str(item.get("length") or ""),
+                "url":       str(item.get("url") or ""),
+                "saved_path": str(item.get("saved_path") or ""),
+                "error":     str(item.get("error") or item.get("save_error") or ""),
                 "sensitive": "",
                 "severity":  "",
                 "ctype":     "application/javascript",
             })
         for f in resolve_sensitive_findings(record):
+            line = str(f.get("line") or "")
+            column = str(f.get("column") or "")
+            location = f"{line}:{column}" if line or column else str(f.get("location") or "")
             rows.append({
                 "kind":      "sensitive",
                 "method":    "",
-                "endpoint":  str(f.get("location") or ""),
-                "source":    str(f.get("source") or ""),
+                "endpoint":  location,
+                "source":    str(f.get("source_label") or f.get("source") or f.get("source_url") or ""),
                 "status":    "",
                 "params":    "",
                 "sensitive": str(f.get("type") or f.get("category") or ""),
                 "severity":  str(f.get("severity") or ""),
                 "ctype":     str(f.get("value") or f.get("masked_value") or ""),
+                "category":  str(f.get("category") or f.get("type") or ""),
+                "field":     str(f.get("field_name") or ""),
+                "value":     str(f.get("value") or f.get("masked_value") or ""),
+                "confidence": str(f.get("confidence") or ""),
+                "location":  location,
+                "matched_by": str(f.get("matched_by") or ""),
+                "context":   str(f.get("context") or ""),
+                "url":       str(f.get("source_url") or ""),
             })
         return rows
 
+    def _columns_for_current_tab(self) -> Tuple[Tuple[str, int], ...]:
+        selected_tab = self._tab_var.get()
+        if selected_tab == _t(self._lang, "tab_apis"):
+            return (("method", 82), ("status", 90), ("accessible", 80), ("length", 80), ("source", 240), ("url", 460))
+        if selected_tab == _t(self._lang, "tab_pages"):
+            return (("status", 90), ("accessible", 80), ("length", 80), ("source", 260), ("url", 480), ("error", 240))
+        if selected_tab == _t(self._lang, "tab_js"):
+            return (("depth", 70), ("status", 90), ("success", 80), ("length", 90), ("saved_path", 240), ("error", 220), ("url", 440))
+        if selected_tab == _t(self._lang, "tab_sensitive"):
+            return (("severity", 90), ("confidence", 90), ("category", 120), ("field", 150), ("value", 180), ("location", 90), ("source", 220), ("matched_by", 180), ("context", 360))
+        return (("kind", 90), ("method", 82), ("endpoint", 260), ("status", 90), ("source", 220), ("severity", 90), ("sensitive", 120), ("url", 360))
+
+    def _configure_result_columns(self) -> None:
+        tree = self._ui["tree"]
+        specs = self._columns_for_current_tab()
+        cols = tuple(key for key, _ in specs)
+        if getattr(self, "_active_cols", ()) != cols:
+            self._active_cols = cols
+            tree.configure(columns=cols)
+        for key, width in specs:
+            tree.heading(key, text=_t(self._lang, f"col_{key}"), command=lambda c=key: self._sort_tree(c))
+            tree.column(key, width=width, minwidth=50, anchor="w")
+
+    def _row_value(self, row: dict, column: str) -> str:
+        if column == "kind":
+            return str(row.get("kind") or "")
+        return str(row.get(column, "") or "")
+
     def _refresh_table(self, rows: List[dict]) -> None:
         tree = self._ui["tree"]
+        self._configure_result_columns()
         self._clear_table()
         for i, r in enumerate(rows):
             method = r["method"].upper()
@@ -1587,9 +1747,7 @@ class CtkDiscoveryApp(ctk.CTk):
             if i % 2:
                 tags.append("alt")
             tree.insert("", "end",
-                values=(r["method"], r["endpoint"], r["source"],
-                        r["status"], r["params"], r["sensitive"],
-                        r["severity"], r["ctype"]),
+                values=tuple(self._row_value(r, column) for column in self._active_cols),
                 tags=tags,
             )
         if not rows:
@@ -1618,8 +1776,7 @@ class CtkDiscoveryApp(ctk.CTk):
         }.get(selected_tab)
         rows = [
             r for r in self._all_rows
-            if (not q or q in (r["method"] + r["endpoint"] + r["source"] + r["status"] +
-                               r["params"] + r["sensitive"] + r["severity"] + r["ctype"]).lower())
+            if (not q or q in " ".join(str(value) for value in r.values()).lower())
             and (tab_kind is None or r.get("kind") == tab_kind)
             and (method_f == all_v or r["method"].upper() == method_f)
             and (status_f == all_v or r["status"] == status_f)
@@ -1648,7 +1805,7 @@ class CtkDiscoveryApp(ctk.CTk):
     def _sort_tree(self, col: str) -> None:
         tree = self._ui["tree"]
         items = [(tree.item(k, "values"), k) for k in tree.get_children("")]
-        col_idx = list(self._COLS).index(col)
+        col_idx = list(getattr(self, "_active_cols", self._COLS)).index(col)
         rev = self._sort_rev if self._sort_col == col else False
         def sort_key(x):
             v = x[0][col_idx]
@@ -1794,6 +1951,14 @@ class CtkDiscoveryApp(ctk.CTk):
             self._headers.pop(name, None)
             self._ui["hdr_tree"].delete(sel[0])
 
+    def _upsert_header(self, name: str, value: str) -> None:
+        self._headers[name] = value
+        for iid in self._ui["hdr_tree"].get_children():
+            if self._ui["hdr_tree"].item(iid, "values")[0] == name:
+                self._ui["hdr_tree"].item(iid, values=(name, value))
+                return
+        self._ui["hdr_tree"].insert("", "end", values=(name, value))
+
     def _on_hdr_import(self) -> None:
         p = _pal()
         dlg = ctk.CTkToplevel(self)
@@ -1809,9 +1974,13 @@ class CtkDiscoveryApp(ctk.CTk):
                              border_width=1, text_color=p["text"])
         tb.pack(fill="both", expand=True, padx=12, pady=4)
         def apply():
-            for k, v in parse_header_lines(tb.get("0.0", "end")).items():
-                self._headers[k] = v
-                self._ui["hdr_tree"].insert("", "end", values=(k, v))
+            try:
+                headers = parse_header_lines(tb.get("0.0", "end"))
+            except ValueError as exc:
+                messagebox.showerror(_t(self._lang, "input_error"), str(exc), parent=dlg)
+                return
+            for k, v in headers.items():
+                self._upsert_header(k, v)
             dlg.destroy()
         self._dialog_button(dlg, "OK", apply).pack(pady=(4, 10))
 
@@ -1833,19 +2002,17 @@ class CtkDiscoveryApp(ctk.CTk):
                          text_color=p["text"]
                          ).pack(fill="x", padx=12)
         def apply():
-            n, v = nv.get().strip(), vv.get().strip()
-            if not n: return
+            try:
+                n, v = parse_header_entry(nv.get(), vv.get())
+            except ValueError as exc:
+                messagebox.showerror(_t(self._lang, "input_error"), str(exc), parent=dlg)
+                return
             if edit_name and edit_name != n:
                 self._headers.pop(edit_name, None)
                 for iid in self._ui["hdr_tree"].get_children():
                     if self._ui["hdr_tree"].item(iid, "values")[0] == edit_name:
                         self._ui["hdr_tree"].delete(iid); break
-            self._headers[n] = v
-            for iid in self._ui["hdr_tree"].get_children():
-                if self._ui["hdr_tree"].item(iid, "values")[0] == n:
-                    self._ui["hdr_tree"].item(iid, values=(n, v))
-                    dlg.destroy(); return
-            self._ui["hdr_tree"].insert("", "end", values=(n, v))
+            self._upsert_header(n, v)
             dlg.destroy()
         self._dialog_button(dlg, "OK", apply).pack(pady=(10, 12))
 
@@ -1962,7 +2129,7 @@ class CtkDiscoveryApp(ctk.CTk):
 
         # Card titles
         for key in ("target_url","output_file","request_headers",
-                    "scan_options","advanced_options"):
+                    "scan_options","browser_options","advanced_options"):
             wkey = f"card_{key}"
             if wkey in self._ui:
                 self._ui[wkey].configure(text=_t(self._lang, key))
@@ -1996,14 +2163,15 @@ class CtkDiscoveryApp(ctk.CTk):
 
         # Tree headings
         if "tree" in self._ui:
-            for col in self._COLS:
-                self._ui["tree"].heading(col, text=_t(self._lang, f"col_{col}"))
+            self._configure_result_columns()
             children = self._ui["tree"].get_children()
             if len(children) == 1 and self._is_empty_row(children[0]):
-                self._ui["tree"].item(children[0], values=(
-                    "", _t(self._lang, "empty_title"), _t(self._lang, "empty_hint"),
-                    "", "", "", "", "",
-                ))
+                values = [""] * len(getattr(self, "_active_cols", self._COLS))
+                if len(values) >= 2:
+                    values[1] = _t(self._lang, "empty_title")
+                if len(values) >= 3:
+                    values[2] = _t(self._lang, "empty_hint")
+                self._ui["tree"].item(children[0], values=tuple(values))
         if "log_tree" in self._ui:
             self._ui["log_tree"].heading("ts",  text=_t(self._lang, "col_ts"))
             self._ui["log_tree"].heading("msg", text=_t(self._lang, "col_msg"))
@@ -2012,7 +2180,7 @@ class CtkDiscoveryApp(ctk.CTk):
             self._ui["hdr_tree"].heading("value", text=_t(self._lang, "col_value"))
 
         # Numeric/advanced labels
-        for key in ("max_js","max_depth","max_workers","timeout","request_delay","recursive_depth"):
+        for key in ("max_js","max_depth","max_workers","timeout","request_delay","recursive_depth","dynamic_wait","dynamic_events","dynamic_action_limit","dynamic_scroll_steps","dynamic_recursive_limit","dynamic_script_body_limit"):
             wkey = f"lbl_{key}"
             if wkey in self._ui:
                 self._ui[wkey].configure(text=_t(self._lang, key))
@@ -2028,7 +2196,7 @@ class CtkDiscoveryApp(ctk.CTk):
                 self._ui[wkey].configure(text=_t(self._lang, key) + ":")
 
         # Checkboxes
-        for key in ("recursive_scan","include_subdomains","skip_probe","verify_ssl"):
+        for key in ("recursive_scan","include_subdomains","skip_probe","verify_ssl","dynamic_analysis","dynamic_actions"):
             wkey = f"chk_{key}"
             if wkey in self._ui:
                 try: self._ui[wkey].configure(text=_t(self._lang, key))

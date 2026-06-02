@@ -1972,10 +1972,6 @@ class CtkDiscoveryApp(ctk.CTk):
         tk.Label(dlg, text=_t(self._lang, "import_hint"),
                  bg=p["surface"], fg=p["text2"],
                  font=("Segoe UI", 10)).pack(anchor="w", padx=12, pady=(10, 4))
-        tb = ctk.CTkTextbox(dlg, font=ctk.CTkFont(size=11),
-                             fg_color=p["field_bg"], border_color=p["field_border"],
-                             border_width=1, text_color=p["text"])
-        tb.pack(fill="both", expand=True, padx=12, pady=4)
         def apply():
             try:
                 headers = parse_header_lines(tb.get("0.0", "end"))
@@ -1985,7 +1981,11 @@ class CtkDiscoveryApp(ctk.CTk):
             for k, v in headers.items():
                 self._upsert_header(k, v)
             dlg.destroy()
-        self._dialog_button(dlg, "OK", apply).pack(pady=(4, 10))
+        self._dialog_button(dlg, "OK", apply).pack(side="bottom", pady=(4, 10))
+        tb = ctk.CTkTextbox(dlg, font=ctk.CTkFont(size=11),
+                             fg_color=p["field_bg"], border_color=p["field_border"],
+                             border_width=1, text_color=p["text"])
+        tb.pack(fill="both", expand=True, padx=12, pady=(0, 4))
 
     def _hdr_dialog(self, edit_name: Optional[str]) -> None:
         p = _pal()

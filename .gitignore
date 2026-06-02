@@ -25,9 +25,6 @@
 !/tests/fixtures/
 !/tests/fixtures/**
 
-# Design specs and documentation.
-!/docs/
-!/docs/**
 
 # Generated files, local environments, and sample scan outputs stay ignored.
 __pycache__/

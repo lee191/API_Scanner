@@ -132,6 +132,30 @@ API_PATTERN_RE_LIST = (
     ),
 )
 AXIOS_OBJECT_RE = re.compile(r"""axios\(\s*\{(?P<body>[^{}]{0,8192}?)\}\s*\)""", re.IGNORECASE | re.DOTALL)
+JQUERY_SHORTHAND_RE = re.compile(
+    r"""\$\.(?:get|post|getJSON|load)\(\s*(?P<quote>["'`])(?P<value>[^"'`]+)(?P=quote)""",
+    re.IGNORECASE,
+)
+HTMX_ATTR_RE = re.compile(
+    r"""\bhx-(?:get|post|put|patch|delete)\s*=\s*(?P<quote>["'])(?P<value>[^"']+)(?P=quote)""",
+    re.IGNORECASE,
+)
+FORM_ACTION_RE = re.compile(
+    r"""<form\b[^>]*?\baction\s*=\s*(?P<quote>["'])(?P<value>[^"']+)(?P=quote)""",
+    re.IGNORECASE,
+)
+SERVICE_CLIENT_RE = re.compile(
+    r"""\b(?:ky|got|superagent|request|node-fetch|useSWR)\b(?:\.(?:get|post|put|patch|delete))?\(\s*(?P<quote>["'`])(?P<value>[^"'`]+)(?P=quote)""",
+    re.IGNORECASE,
+)
+SOCKET_IO_RE = re.compile(
+    r"""\bio(?:\.connect)?\(\s*(?P<quote>["'`])(?P<value>[^"'`]+)(?P=quote)""",
+    re.IGNORECASE,
+)
+REACT_ROUTER_RE = re.compile(
+    r"""<Route\b[^>]*?\bpath\s*=\s*(?P<quote>["'])(?P<value>/[^"']*)(?P=quote)""",
+    re.IGNORECASE,
+)
 SCRIPT_BLOCK_RE = re.compile(r"<script\b(?P<attrs>[^>]*)>(?P<body>[\s\S]*?)</script\s*>", re.IGNORECASE)
 SCRIPT_SRC_RE = re.compile(r"""\bsrc\s*=\s*(?P<quote>["']?)(?P<value>[^"' >]+)(?P=quote)""", re.IGNORECASE)
 HARD_CODED_EMAIL_RE = re.compile(
@@ -428,6 +452,8 @@ class Config:
     dynamic_action_limit: int = 12
     dynamic_scroll_steps: int = 3
     dynamic_recursive_limit: int = 50
+    scan_well_known: bool = True
+    min_confidence: str = "low"
 
 
 @dataclass
@@ -481,7 +507,49 @@ class Candidate:
     url: str
     path: str
     kind: str
-    sources: Set[str] = field(default_factory=set)
+    sources: Set[str] = field(default_factory=set)  # source labels where URL was discovered (e.g. "html:https://x")
+    confidence: str = "low"
+    detectors: Set[str] = field(default_factory=set)  # detector names (e.g. "fetch", "axios_method") that matched this URL
+
+
+CONFIDENCE_RANK = {"low": 1, "medium": 2, "high": 3}
+
+
+def merge_confidence(current: str, incoming: str) -> str:
+    # Unknown strings fall back to rank 1 (same as "low") for resilience.
+    current_rank = CONFIDENCE_RANK.get(current, 1)
+    incoming_rank = CONFIDENCE_RANK.get(incoming, 1)
+    return incoming if incoming_rank > current_rank else current
+
+
+@dataclass(frozen=True)
+class Detector:
+    name: str
+    confidence: str
+    kind: str
+    pattern: Optional["re.Pattern"] = None
+    extractor: Optional[Callable[..., List[str]]] = None
+
+
+_PATTERN_DETECTORS = (
+    Detector("quoted_path", "low", "auto", pattern=QUOTED_PATH_RE),
+    Detector("fetch", "high", "auto", pattern=API_PATTERN_RE_LIST[0]),
+    Detector("axios_method", "high", "auto", pattern=API_PATTERN_RE_LIST[1]),
+    Detector("url_field", "high", "auto", pattern=API_PATTERN_RE_LIST[2]),
+    Detector("xhr_open", "high", "auto", pattern=API_PATTERN_RE_LIST[3]),
+    Detector("base_url", "high", "auto", pattern=API_PATTERN_RE_LIST[4]),
+    Detector("api_path_literal", "high", "auto", pattern=API_PATTERN_RE_LIST[5]),
+    Detector("websocket_ctor", "high", "auto", pattern=API_PATTERN_RE_LIST[6]),
+    Detector("websocket_url", "high", "auto", pattern=API_PATTERN_RE_LIST[7]),
+    Detector("jquery_shorthand", "high", "auto", pattern=JQUERY_SHORTHAND_RE),
+    Detector("htmx_attr", "high", "auto", pattern=HTMX_ATTR_RE),
+    Detector("form_action", "medium", "page", pattern=FORM_ACTION_RE),
+    Detector("service_client", "high", "api", pattern=SERVICE_CLIENT_RE),
+    Detector("socket_io", "medium", "api", pattern=SOCKET_IO_RE),
+    Detector("react_router", "medium", "page", pattern=REACT_ROUTER_RE),
+)
+
+DETECTOR_REGISTRY: Tuple[Detector, ...] = _PATTERN_DETECTORS  # extended after extractor functions below
 
 
 @dataclass(frozen=True)
@@ -591,6 +659,25 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--dynamic-scroll-steps", type=int, default=3, help="브라우저에서 아래로 스크롤할 횟수(기본값: 3)")
     parser.add_argument("--dynamic-recursive-limit", type=int, default=50, help="브라우저 분석으로 찾은 페이지 중 추가 방문할 최대 개수(기본값: 50)")
     parser.add_argument("--no-verify-ssl", action="store_true", help="SSL 인증서 검증을 건너뜁니다(자체 서명 인증서 허용).")
+    parser.add_argument(
+        "--scan-well-known",
+        dest="scan_well_known",
+        action="store_true",
+        default=True,
+        help="robots.txt/sitemap.xml에서 추가 경로를 탐색합니다(기본값: 활성).",
+    )
+    parser.add_argument(
+        "--no-scan-well-known",
+        dest="scan_well_known",
+        action="store_false",
+        help="robots.txt/sitemap.xml 탐색을 끕니다.",
+    )
+    parser.add_argument(
+        "--min-confidence",
+        choices=("low", "medium", "high"),
+        default="low",
+        help="이 신뢰도 미만의 경로/API 후보를 출력에서 제외합니다(기본값: low=전체).",
+    )
     parser.add_argument("--debug", action="store_true", help="오류 발생 시 traceback을 함께 출력합니다.")
 
     args = parser.parse_args(argv)
@@ -625,6 +712,8 @@ def build_config(args: argparse.Namespace) -> Config:
         dynamic_action_limit=max(0, args.dynamic_action_limit),
         dynamic_scroll_steps=max(0, args.dynamic_scroll_steps),
         dynamic_recursive_limit=max(0, args.dynamic_recursive_limit),
+        scan_well_known=bool(args.scan_well_known),
+        min_confidence=str(args.min_confidence),
     )
     validate_config(config)
     return config
@@ -653,6 +742,8 @@ def validate_config(config: Config) -> None:
         raise ValueError("동적 스크롤 단계 수는 0 이상이어야 합니다.")
     if config.dynamic_recursive_limit < 0:
         raise ValueError("동적 재귀 큐 한도는 0 이상이어야 합니다.")
+    if config.min_confidence not in {"low", "medium", "high"}:
+        raise ValueError("min_confidence는 low, medium, high 중 하나여야 합니다.")
     validate_proxy_url(config.proxy_url)
     validate_output_path(config.output)
     validate_js_output_dir(config.js_output_dir)
@@ -1471,6 +1562,26 @@ def add_candidate(bucket: Dict[str, Candidate], absolute_url: str, source: str, 
     candidate.sources.add(source)
 
 
+def add_candidate_with_confidence(
+    bucket: Dict[str, Candidate],
+    absolute_url: str,
+    source: str,
+    kind: str,
+    confidence: str,
+    detector_name: str,
+) -> None:
+    path = normalize_path(absolute_url)
+    key = candidate_identity(absolute_url)
+    candidate = bucket.get(key)
+    if candidate is None:
+        candidate = Candidate(url=absolute_url, path=path, kind=kind, confidence=confidence)
+        bucket[key] = candidate
+    else:
+        candidate.confidence = merge_confidence(candidate.confidence, confidence)
+    candidate.sources.add(source)
+    candidate.detectors.add(detector_name)
+
+
 def discard_candidate(bucket: Dict[str, Candidate], absolute_url: str) -> None:
     bucket.pop(candidate_identity(absolute_url), None)
 
@@ -1565,6 +1676,158 @@ def extract_axios_component_urls(text: str, base_url: str, *, allow_disallowed_h
     return urls
 
 
+_OPENAPI_PATHS_BLOCK_RE = re.compile(r'"paths"\s*:\s*\{', re.IGNORECASE)
+_OPENAPI_PATH_KEY_RE = re.compile(r'"(?P<value>/[^"]*)"\s*:')
+_VUE_ROUTE_PATH_RE = re.compile(r"""\bpath\s*:\s*(?P<quote>["'`])(?P<value>/[^"'`]*)(?P=quote)""")
+_STATE_BLOB_MARKER_RE = re.compile(
+    r"(?:__INITIAL_STATE__|__NUXT__|__APOLLO_STATE__|__NEXT_DATA__)", re.IGNORECASE
+)
+_STATE_BLOB_URL_RE = re.compile(
+    r"""(?P<quote>["'`])(?P<value>(?:https?://[^"'`]+|/[A-Za-z0-9_][^"'`]*))(?P=quote)"""
+)
+
+
+def extract_openapi_paths(text: str, base_url: str, *, allow_disallowed_host: bool) -> List[str]:
+    if '"paths"' not in text and "'paths'" not in text:
+        return []
+    results: List[str] = []
+    for block in _OPENAPI_PATHS_BLOCK_RE.finditer(text):
+        start = block.end()
+        window = text[start : start + 20000]
+        for key in _OPENAPI_PATH_KEY_RE.finditer(window):
+            results.append(key.group("value"))
+    return results
+
+
+def extract_vue_router_paths(text: str, base_url: str, *, allow_disallowed_host: bool) -> List[str]:
+    return [match.group("value") for match in _VUE_ROUTE_PATH_RE.finditer(text)]
+
+
+def extract_state_blob_urls(text: str, base_url: str, *, allow_disallowed_host: bool) -> List[str]:
+    if not _STATE_BLOB_MARKER_RE.search(text):
+        return []
+    results: List[str] = []
+    for marker in _STATE_BLOB_MARKER_RE.finditer(text):
+        window = text[marker.end() : marker.end() + 20000]
+        for url_match in _STATE_BLOB_URL_RE.finditer(window):
+            results.append(url_match.group("value"))
+    return results
+
+
+_EXTRACTOR_DETECTORS = (
+    Detector("openapi_paths", "high", "api", extractor=extract_openapi_paths),
+    Detector("vue_router", "medium", "page", extractor=extract_vue_router_paths),
+    Detector("state_blob", "low", "auto", extractor=extract_state_blob_urls),
+)
+DETECTOR_REGISTRY = _PATTERN_DETECTORS + _EXTRACTOR_DETECTORS
+
+_ROBOTS_RULE_RE = re.compile(r"^\s*(Disallow|Allow)\s*:\s*(?P<value>\S+)", re.IGNORECASE | re.MULTILINE)
+_ROBOTS_SITEMAP_RE = re.compile(r"^\s*Sitemap\s*:\s*(?P<value>\S+)", re.IGNORECASE | re.MULTILINE)
+_SITEMAP_LOC_RE = re.compile(r"<loc>\s*(?P<value>[^<\s]+)\s*</loc>", re.IGNORECASE)
+_SITEMAPINDEX_RE = re.compile(r"<sitemapindex\b", re.IGNORECASE)
+
+
+def parse_robots_txt(text: str) -> Tuple[List[str], List[str]]:
+    paths: List[str] = []
+    sitemaps: List[str] = []
+    for line in text.splitlines():
+        sitemap_match = _ROBOTS_SITEMAP_RE.match(line)
+        if sitemap_match:
+            sitemaps.append(sitemap_match.group("value").strip())
+            continue
+        rule_match = _ROBOTS_RULE_RE.match(line)
+        if rule_match:
+            value = rule_match.group("value").strip()
+            if not value or value == "/":
+                continue
+            if "*" in value or "$" in value or "?" in value:
+                continue
+            paths.append(value)
+    return paths, sitemaps
+
+
+def parse_sitemap_xml(text: str) -> Tuple[List[str], List[str]]:
+    locs = [match.group("value").strip() for match in _SITEMAP_LOC_RE.finditer(text)]
+    if _SITEMAPINDEX_RE.search(text):
+        return [], locs
+    return locs, []
+
+
+WELL_KNOWN_MAX_SITEMAPS = 10
+WELL_KNOWN_MAX_URLS = 500
+
+
+def discover_well_known(
+    target_url: str,
+    scope: UrlScope,
+    timeout: float,
+    headers: Optional[Dict[str, str]],
+    header_origin_url: str,
+    verify_ssl: bool,
+    proxy_url: str,
+    page_bucket: Dict[str, "Candidate"],
+) -> None:
+    allow_disallowed_host = should_allow_disallowed_host(target_url)
+    origin = get_origin_key(target_url)
+    added = 0
+
+    def _fetch(url: str) -> Optional[FetchResult]:
+        fetch_kwargs: Dict[str, object] = {
+            "timeout": timeout,
+            "method": "GET",
+            "headers": request_headers_for_target(headers, header_origin_url, url) if header_origin_url else headers,
+            "verify_ssl": verify_ssl,
+        }
+        if proxy_url:
+            fetch_kwargs["proxy_url"] = proxy_url
+        result = fetch_text(url, **fetch_kwargs)
+        return result if result.success else None
+
+    def _add(raw_value: str, detector_name: str, confidence: str) -> None:
+        nonlocal added
+        if added >= WELL_KNOWN_MAX_URLS:
+            return
+        absolute = _resolve_candidate_for_detection(
+            target_url, raw_value, allow_disallowed_host=allow_disallowed_host
+        )
+        if not absolute or not url_matches_scope(absolute, scope):
+            return
+        path = normalize_path(absolute)
+        if path == "/" or is_static_asset(path):
+            return
+        add_candidate_with_confidence(
+            page_bucket, absolute, f"{detector_name}:{target_url}", "page", confidence, detector_name
+        )
+        added += 1
+
+    sitemap_queue: List[str] = []
+    robots_result = _fetch(f"{origin}/robots.txt")
+    if robots_result is not None:
+        robots_paths, robots_sitemaps = parse_robots_txt(robots_result.text)
+        for value in robots_paths:
+            _add(value, "robots_txt", "medium")
+        sitemap_queue.extend(robots_sitemaps)
+
+    sitemap_queue.append(f"{origin}/sitemap.xml")
+    visited_sitemaps: Set[str] = set()
+    fetched_count = 0
+    while sitemap_queue and fetched_count < WELL_KNOWN_MAX_SITEMAPS:
+        sitemap_url = sitemap_queue.pop(0)
+        if sitemap_url in visited_sitemaps:
+            continue
+        visited_sitemaps.add(sitemap_url)
+        fetched_count += 1
+        sitemap_result = _fetch(sitemap_url)
+        if sitemap_result is None:
+            continue
+        locs, nested = parse_sitemap_xml(sitemap_result.text)
+        for loc in locs:
+            _add(loc, "sitemap_xml", "high")
+        for nested_url in nested:
+            if nested_url not in visited_sitemaps:
+                sitemap_queue.append(nested_url)
+
+
 def collect_path_candidates(
     text: str,
     base_url: str,
@@ -1574,21 +1837,44 @@ def collect_path_candidates(
     api_bucket: Dict[str, Candidate],
 ) -> None:
     allow_disallowed_host = should_allow_disallowed_host(base_url)
-    for match in QUOTED_PATH_RE.finditer(text):
-        raw_value = match.group("value").strip()
-        absolute = _resolve_candidate_for_detection(base_url, raw_value, allow_disallowed_host=allow_disallowed_host)
+
+    def _ingest(raw_value: str, detector: Detector) -> None:
+        absolute = _resolve_candidate_for_detection(
+            base_url, raw_value, allow_disallowed_host=allow_disallowed_host
+        )
         if not absolute:
-            continue
+            return
         if not url_matches_scope(absolute, scope):
-            continue
+            return
         path = normalize_path(absolute)
         if path == "/" or is_static_asset(path):
-            continue
-        kind = classify_candidate(raw_value, absolute)
-        if kind == "api":
-            add_api_candidate(api_bucket, page_bucket, absolute, source_label)
+            return
+        if detector.kind == "auto":
+            kind = classify_candidate(raw_value, absolute)
         else:
-            add_candidate(page_bucket, absolute, source_label, "page")
+            kind = detector.kind
+        if kind == "api":
+            if path.rstrip("/") in {"/api", "/apis"}:
+                return
+            discard_candidate(page_bucket, absolute)
+            add_candidate_with_confidence(
+                api_bucket, absolute, source_label, "api", detector.confidence, detector.name
+            )
+        else:
+            add_candidate_with_confidence(
+                page_bucket, absolute, source_label, "page", detector.confidence, detector.name
+            )
+
+    for detector in DETECTOR_REGISTRY:
+        if detector.pattern is not None:
+            for match in detector.pattern.finditer(text):
+                raw_value = match.group("value").strip()
+                _ingest(raw_value, detector)
+        elif detector.extractor is not None:
+            for raw_value in detector.extractor(
+                text, base_url, allow_disallowed_host=allow_disallowed_host
+            ):
+                _ingest(raw_value, detector)
 
     for absolute in extract_axios_combined_urls(text, base_url, allow_disallowed_host=allow_disallowed_host):
         if not url_matches_scope(absolute, scope):
@@ -1596,22 +1882,10 @@ def collect_path_candidates(
         path = normalize_path(absolute)
         if is_static_asset(path):
             continue
-        add_api_candidate(api_bucket, page_bucket, absolute, source_label)
-
-    for pattern in API_PATTERN_RE_LIST:
-        for match in pattern.finditer(text):
-            raw_value = match.group("value").strip()
-            absolute = _resolve_candidate_for_detection(base_url, raw_value, allow_disallowed_host=allow_disallowed_host)
-            if not absolute:
-                continue
-            if not url_matches_scope(absolute, scope):
-                continue
-            path = normalize_path(absolute)
-            if is_static_asset(path):
-                continue
-            if path.rstrip("/") in {"/api", "/apis"}:
-                continue
-            add_api_candidate(api_bucket, page_bucket, absolute, source_label)
+        discard_candidate(page_bucket, absolute)
+        add_candidate_with_confidence(
+            api_bucket, absolute, source_label, "api", "high", "axios_combined"
+        )
 
     for absolute in extract_axios_component_urls(text, base_url, allow_disallowed_host=allow_disallowed_host):
         discard_candidate(api_bucket, absolute)
@@ -2919,7 +3193,20 @@ def build_result_row(
         "probe_error": probe.error,
         "length": probe.length,
         "sources": sorted(candidate.sources),
+        "confidence": candidate.confidence,
+        "detectors": sorted(candidate.detectors),
     }
+
+
+def filter_rows_by_min_confidence(rows: List[dict], min_confidence: str) -> List[dict]:
+    threshold = CONFIDENCE_RANK.get(min_confidence, 1)
+    if threshold <= 1:
+        return rows
+    return [
+        row
+        for row in rows
+        if CONFIDENCE_RANK.get(str(row.get("confidence", "low")), 1) >= threshold
+    ]
 
 
 def build_result_rows(
@@ -3497,6 +3784,20 @@ def _discover_once(
             if child_url not in visited_scripts:
                 queue.append((child_url, depth + 1))
 
+    if config.scan_well_known:
+        ensure_not_cancelled(execution)
+        emit_progress(progress, "robots.txt/sitemap.xml에서 추가 경로를 찾는 중입니다.")
+        discover_well_known(
+            target_url=document_url,
+            scope=scope,
+            timeout=config.timeout,
+            headers=config.headers,
+            header_origin_url=config.url,
+            verify_ssl=config.verify_ssl,
+            proxy_url=config.proxy_url,
+            page_bucket=page_bucket,
+        )
+
     page_bucket, skipped_pages = filter_candidate_bucket_by_path(page_bucket, state.known_page_paths)
     api_bucket, skipped_apis = filter_candidate_bucket_by_path(api_bucket, state.known_api_paths)
     state.skipped_page_duplicates += skipped_pages
@@ -3531,6 +3832,9 @@ def _discover_once(
         verify_ssl=config.verify_ssl,
         proxy_url=config.proxy_url,
     )
+
+    all_pages = filter_rows_by_min_confidence(all_pages, config.min_confidence)
+    all_apis = filter_rows_by_min_confidence(all_apis, config.min_confidence)
 
     all_pages, skipped_row_pages = dedupe_result_rows_by_path(all_pages)
     all_apis, skipped_row_apis = dedupe_result_rows_by_path(all_apis)
@@ -4002,13 +4306,14 @@ def build_dynamic_sheet_rows(dynamic_result: dict) -> List[List[object]]:
 
 
 def build_result_sheet_rows(rows_data: List[dict]) -> List[List[object]]:
-    rows: List[List[object]] = [["상태", "접근 가능", "방법", "경로", "출처", "URL"]]
+    rows: List[List[object]] = [["상태", "접근 가능", "방법", "신뢰도", "경로", "출처", "URL"]]
     for item in rows_data:
         rows.append(
             [
                 item.get("status_code", "-"),
                 format_accessible_label(item.get("accessible")),
                 item.get("probe_method", "") or "",
+                item.get("confidence", "") or "",
                 item.get("path", "") or "",
                 ", ".join(item.get("sources", [])),
                 item.get("url", ""),

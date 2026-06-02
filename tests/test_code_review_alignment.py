@@ -241,6 +241,7 @@ class CodeReviewAlignmentTests(unittest.TestCase):
             timeout=1.0,
             output=Path("discovery-result.json"),
             skip_probe=False,
+            scan_well_known=False,
         )
         root_html = '<html><script src="/a.js"></script><script src="/b.js"></script></html>'
 
@@ -265,6 +266,7 @@ class CodeReviewAlignmentTests(unittest.TestCase):
             timeout=1.0,
             output=Path("discovery-result.json"),
             skip_probe=False,
+            scan_well_known=False,
         )
         root_html = '<html><script src="/a.js"></script><script src="/b.js"></script></html>'
 
@@ -295,6 +297,7 @@ class CodeReviewAlignmentTests(unittest.TestCase):
                 output=Path("discovery-result.json"),
                 skip_probe=False,
                 js_output_dir=Path(tmp_dir),
+                scan_well_known=False,
             )
             root_html = '<html><script src="/assets/app.js?v=1"></script></html>'
             js_text = "console.log('saved')"
@@ -323,6 +326,7 @@ class CodeReviewAlignmentTests(unittest.TestCase):
             output=Path("discovery-result.json"),
             skip_probe=False,
             js_output_dir=Path("js-files"),
+            scan_well_known=False,
         )
         root_html = '<html><script src="/app.js"></script></html>'
         js_text = "console.log('still scanned')"
@@ -359,6 +363,7 @@ class CodeReviewAlignmentTests(unittest.TestCase):
             skip_probe=False,
             recursive_scan=True,
             recursive_depth=1,
+            scan_well_known=False,
         )
         root_html = '<html><script src="/root.js"></script></html>'
         root_js = 'const nextPage = "/about";'
@@ -402,6 +407,7 @@ class CodeReviewAlignmentTests(unittest.TestCase):
             recursive_depth=1,
             include_subdomains=True,
             excluded_subdomains=("cdn.example.com",),
+            scan_well_known=False,
         )
         root_html = '<html><script src="/root.js"></script></html>'
         root_js = 'const nextPage = "https://cdn.example.com/about";'
@@ -428,6 +434,7 @@ class CodeReviewAlignmentTests(unittest.TestCase):
             timeout=1.0,
             output=Path("discovery-result.json"),
             skip_probe=False,
+            scan_well_known=False,
         )
         root_html = (
             "<html>"
@@ -488,6 +495,7 @@ class CodeReviewAlignmentTests(unittest.TestCase):
             timeout=1.0,
             output=Path("discovery-result.json"),
             skip_probe=False,
+            scan_well_known=False,
         )
         root_html = (
             "<html><script>"

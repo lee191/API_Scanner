@@ -31,6 +31,8 @@ Route API Discovery는 웹 애플리케이션 보안 분석을 위한 자동화 
 ✅ **민감정보 탐지** - 이메일, 전화번호, 토큰, 개인정보 등 12가지 카테고리  
 ✅ **GUI & CLI** - 사용자 친화적인 인터페이스와 자동화 가능한 CLI  
 ✅ **다국어 지원** - 한국어/영어 UI
+✅ **신뢰도 등급** - 모든 경로/API 후보에 high/medium/low confidence 부여, 정렬·필터 지원
+✅ **well-known 탐색** - robots.txt / sitemap.xml에서 추가 경로 자동 수집
 
 ---
 
@@ -330,6 +332,13 @@ GUI 우측 상단의 언어 메뉴에서 한국어/English 전환 가능
 | `--proxy` | 프록시 URL | - |
 | `--no-verify-ssl` | SSL 검증 비활성화 | False |
 | `--skip-probe` | 경로 접근성 확인 생략 | False |
+
+### Well-Known & 신뢰도
+
+| 옵션 | 설명 | 기본값 |
+|-----|------|-------|
+| `--scan-well-known` / `--no-scan-well-known` | robots.txt/sitemap.xml 경로 탐색 | 활성 |
+| `--min-confidence {low,medium,high}` | 지정 신뢰도 미만 경로/API 제외 | low |
 
 ---
 

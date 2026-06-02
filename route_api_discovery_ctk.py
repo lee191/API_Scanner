@@ -1636,6 +1636,7 @@ class CtkDiscoveryApp(ctk.CTk):
                 "sensitive": "",
                 "severity":  "",
                 "ctype":     str(item.get("content_type") or ""),
+                "confidence": str(item.get("confidence") or ""),
             })
         for item in self._page_items(record):
             rows.append({
@@ -1652,6 +1653,7 @@ class CtkDiscoveryApp(ctk.CTk):
                 "sensitive": "",
                 "severity":  "",
                 "ctype":     "text/html",
+                "confidence": str(item.get("confidence") or ""),
             })
         for item in record.get("js_files") or []:
             rows.append({
@@ -1670,6 +1672,7 @@ class CtkDiscoveryApp(ctk.CTk):
                 "sensitive": "",
                 "severity":  "",
                 "ctype":     "application/javascript",
+                "confidence": "",
             })
         for f in resolve_sensitive_findings(record):
             line = str(f.get("line") or "")
